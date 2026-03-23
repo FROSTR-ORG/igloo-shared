@@ -5,4 +5,5 @@ export * from './observability';
 export * from './profile-backup-host';
 export * from './pwa-runtime-host';
 export * from './profile-package';
+export * from './rotation';
 export * from './signer-settings';

@@ -66,6 +66,8 @@ export type WasmProfilePackageApi = {
 
 export type WasmKeysetApi = {
   create_keyset_bundle: (configJson: string) => string;
+  rotate_keyset_bundle: (inputJson: string) => string;
+  derive_group_id: (groupJson: string) => string;
 };
 
 type WasmBridgeModule = {
@@ -122,6 +124,8 @@ type WasmBridgeModule = {
   build_profile_backup_event: WasmProfilePackageApi['build_profile_backup_event'];
   parse_profile_backup_event: WasmProfilePackageApi['parse_profile_backup_event'];
   create_keyset_bundle: WasmKeysetApi['create_keyset_bundle'];
+  rotate_keyset_bundle: WasmKeysetApi['rotate_keyset_bundle'];
+  derive_group_id: WasmKeysetApi['derive_group_id'];
 };
 
 type WasmBridgeLoaderModule = {
@@ -151,6 +155,8 @@ type WasmBridgeLoaderModule = {
   build_profile_backup_event?: WasmBridgeModule['build_profile_backup_event'];
   parse_profile_backup_event?: WasmBridgeModule['parse_profile_backup_event'];
   create_keyset_bundle?: WasmBridgeModule['create_keyset_bundle'];
+  rotate_keyset_bundle?: WasmBridgeModule['rotate_keyset_bundle'];
+  derive_group_id?: WasmBridgeModule['derive_group_id'];
 };
 
 type AssertedWasmBridgeModule = WasmBridgeModule & Required<WasmBridgeLoaderModule>;
@@ -161,12 +167,35 @@ declare global {
   }
 }
 
+type ExtensionRuntimeApi = {
+  getURL?: (path: string) => string;
+  id?: string;
+};
+
 let cachedModule: WasmBridgeModule | null = null;
 let loadingModulePromise: Promise<WasmBridgeModule> | null = null;
 let injectedModuleForTests: WasmBridgeModule | null = null;
 
 function getAssetUrl(path: string) {
   return new URL(path, window.location.origin).toString();
+}
+
+function getExtensionRuntime(): ExtensionRuntimeApi | null {
+  const chromeRuntime = (globalThis as typeof globalThis & {
+    chrome?: { runtime?: ExtensionRuntimeApi };
+  }).chrome?.runtime;
+  if (chromeRuntime?.getURL && chromeRuntime.id) {
+    return chromeRuntime;
+  }
+  return null;
+}
+
+function getExtensionAssetUrl(path: string) {
+  const runtime = getExtensionRuntime();
+  if (!runtime?.getURL) {
+    return null;
+  }
+  return runtime.getURL(path);
 }
 
 function useBrowserAssetUrls() {
@@ -184,12 +213,20 @@ async function getLoaderImportUrl() {
   if (useBrowserAssetUrls()) {
     return getAssetUrl('wasm/bifrost_bridge_wasm.js');
   }
+  const extensionUrl = getExtensionAssetUrl('wasm/bifrost_bridge_wasm.js');
+  if (extensionUrl) {
+    return extensionUrl;
+  }
   throw new Error('No injected WASM bridge module is available in this non-browser environment.');
 }
 
 function getWasmBinaryUrl() {
   if (useBrowserAssetUrls()) {
     return getAssetUrl('wasm/bifrost_bridge_wasm_bg.wasm');
+  }
+  const extensionUrl = getExtensionAssetUrl('wasm/bifrost_bridge_wasm_bg.wasm');
+  if (extensionUrl) {
+    return extensionUrl;
   }
   throw new Error('No browser WASM asset URL is available in this non-browser environment.');
 }
@@ -224,7 +261,9 @@ function assertWasmBridgeModule(module: Partial<WasmBridgeModule>): AssertedWasm
     !module.decrypt_profile_backup_content ||
     !module.build_profile_backup_event ||
     !module.parse_profile_backup_event ||
-    !module.create_keyset_bundle
+    !module.create_keyset_bundle ||
+    !module.rotate_keyset_bundle ||
+    !module.derive_group_id
   ) {
     throw new Error('WASM bridge module loaded but required exports are missing');
   }
@@ -360,5 +399,7 @@ export async function getWasmKeysetApi(): Promise<WasmKeysetApi> {
   const module = await loadWasmBridgeModule();
   return {
     create_keyset_bundle: module.create_keyset_bundle,
+    rotate_keyset_bundle: module.rotate_keyset_bundle,
+    derive_group_id: module.derive_group_id,
   };
 }

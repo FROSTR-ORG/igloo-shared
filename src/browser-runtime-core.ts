@@ -18,9 +18,12 @@ import {
 } from './signer-settings';
 
 const DEFAULT_RELAYS_FALLBACK = ['ws://127.0.0.1:8194'];
+const BROWSER_RUNTIME_ENV = ((import.meta as ImportMeta & {
+  env?: Record<string, string | undefined>;
+}).env ?? {});
 
 function envDefaultRelays(): string[] {
-  const raw = import.meta.env.VITE_DEFAULT_RELAYS;
+  const raw = BROWSER_RUNTIME_ENV.VITE_DEFAULT_RELAYS;
   if (typeof raw !== 'string' || raw.trim().length === 0) {
     return DEFAULT_RELAYS_FALLBACK;
   }
@@ -33,14 +36,16 @@ function envDefaultRelays(): string[] {
 
 export const DEFAULT_RELAYS = envDefaultRelays();
 
-const BIFROST_EVENT_KIND_RAW = Number(import.meta.env.VITE_BIFROST_EVENT_KIND ?? 20000);
+const BIFROST_EVENT_KIND_RAW = Number(BROWSER_RUNTIME_ENV.VITE_BIFROST_EVENT_KIND ?? 20000);
 const BIFROST_EVENT_KIND = Number.isFinite(BIFROST_EVENT_KIND_RAW)
   ? BIFROST_EVENT_KIND_RAW
   : 20000;
-const ONBOARD_TIMEOUT_MS = 20_000;
-const PING_TIMEOUT_MS = 12_000;
-const BRIDGE_COMMAND_TIMEOUT_MS = 35_000;
-const PREPARE_OPERATION_TIMEOUT_MS = 15_000;
+const ONBOARD_TIMEOUT_MS = 10_000;
+const PING_TIMEOUT_MS = 10_000;
+const BRIDGE_COMMAND_TIMEOUT_MS = 10_000;
+const PREPARE_OPERATION_TIMEOUT_MS = 10_000;
+const WASM_RUNTIME_INIT_TIMEOUT_MS = 10_000;
+const RELAY_CONNECT_TIMEOUT_MS = 10_000;
 const RECOVERED_PENDING_OPS_REASON = 'pending_operations_recovered';
 const logger = createLogger('igloo.runtime');
 
@@ -78,6 +83,15 @@ type OnboardingRequestResult = {
   response: OnboardResponseWire;
   bundle: OnboardingRequestBundleWire;
 };
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    })
+  ]);
+}
 
 export type DecodedOnboardingProfile = {
   publicKey: string;
@@ -735,7 +749,17 @@ class BrowserBridgeNode implements NodeWithEvents {
 
   async connect() {
     try {
-      this.runtime = await createWasmBridgeRuntime();
+      this.emitLog('info', 'runtime', 'wasm_runtime_init_begin', {
+        mode: this.config.mode
+      });
+      this.runtime = await withTimeout(
+        createWasmBridgeRuntime(),
+        WASM_RUNTIME_INIT_TIMEOUT_MS,
+        'WASM bridge runtime initialization'
+      );
+      this.emitLog('info', 'runtime', 'wasm_runtime_init_ok', {
+        mode: this.config.mode
+      });
     } catch (error) {
       throw withContext('Failed to load WASM runtime', error);
     }
@@ -792,13 +816,26 @@ class BrowserBridgeNode implements NodeWithEvents {
       }
     };
 
-    await this.connectActiveRelays();
+    this.emitLog('info', 'relay', 'bootstrap_begin', {
+      relay_count: this.activeRelays.length,
+      relays: this.activeRelays
+    });
+    await withTimeout(this.connectActiveRelays(), RELAY_CONNECT_TIMEOUT_MS, 'Relay connection bootstrap');
+    this.emitLog('info', 'relay', 'bootstrap_ok', {
+      connected_relays: Array.from(this.connectedRelays)
+    });
 
     if (this.config.mode === 'persisted') {
+      this.emitLog('info', 'runtime', 'restore_runtime_begin', {
+        mode: 'persisted'
+      });
       const restored = this.tryRestoreRuntime(runtimeConfig);
       if (!restored) {
         throw new Error('Failed to restore runtime snapshot');
       }
+      this.emitLog('info', 'runtime', 'restore_runtime_ok', {
+        mode: 'persisted'
+      });
     } else if (this.config.mode === 'profile') {
       let bootstrap: RuntimeBootstrapWire;
       try {
@@ -807,7 +844,13 @@ class BrowserBridgeNode implements NodeWithEvents {
         throw withContext('Failed to build profile runtime bootstrap', error);
       }
       try {
+        this.emitLog('info', 'runtime', 'init_runtime_begin', {
+          mode: 'profile'
+        });
         this.runtime.init_runtime(JSON.stringify(runtimeConfig), JSON.stringify(bootstrap));
+        this.emitLog('info', 'runtime', 'init_runtime_ok', {
+          mode: 'profile'
+        });
       } catch (error) {
         throw withContext('Failed to initialize signer runtime', error);
       }
@@ -847,7 +890,13 @@ class BrowserBridgeNode implements NodeWithEvents {
       }
 
       try {
+        this.emitLog('info', 'runtime', 'restore_runtime_begin', {
+          mode: 'onboarding'
+        });
         this.runtime.restore_runtime(JSON.stringify(runtimeConfig), onboardingSnapshotJson);
+        this.emitLog('info', 'runtime', 'restore_runtime_ok', {
+          mode: 'onboarding'
+        });
       } catch (error) {
         throw withContext('Failed to initialize signer runtime', error);
       }

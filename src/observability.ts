@@ -23,8 +23,12 @@ const LOG_LEVEL_RANK: Record<ObservabilityLevel, number> = {
   error: 40
 };
 
-const DEBUG_ENABLED = import.meta.env.VITE_IGLOO_DEBUG === '1';
-const VERBOSE_ENABLED = DEBUG_ENABLED || import.meta.env.VITE_IGLOO_VERBOSE === '1';
+const OBSERVABILITY_ENV = ((import.meta as ImportMeta & {
+  env?: Record<string, string | undefined>;
+}).env ?? {});
+
+const DEBUG_ENABLED = OBSERVABILITY_ENV.VITE_IGLOO_DEBUG === '1';
+const VERBOSE_ENABLED = DEBUG_ENABLED || OBSERVABILITY_ENV.VITE_IGLOO_VERBOSE === '1';
 const ACTIVE_LEVEL: ObservabilityLevel = DEBUG_ENABLED
   ? 'debug'
   : VERBOSE_ENABLED

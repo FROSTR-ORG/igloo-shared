@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build:bridge-wasm": "./scripts/build-bridge-wasm.sh",
+    "test:typecheck": "bunx tsc --noEmit",
     "test:bridge-wasm-exports": "node ./scripts/check-bridge-wasm-exports.mjs"
   },
   "dependencies": {

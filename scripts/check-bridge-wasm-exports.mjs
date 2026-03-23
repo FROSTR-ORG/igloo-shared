@@ -26,6 +26,9 @@ const requiredExports = [
   'decrypt_profile_backup_content',
   'build_profile_backup_event',
   'parse_profile_backup_event',
+  'create_keyset_bundle',
+  'rotate_keyset_bundle',
+  'derive_group_id',
 ];
 
 const modulePath = path.resolve('public/wasm/bifrost_bridge_wasm.js');

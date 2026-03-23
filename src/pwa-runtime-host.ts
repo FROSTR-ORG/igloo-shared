@@ -254,7 +254,7 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
     throw new Error(`${toErrorMessage(error)}${suffix}`);
   } finally {
     logs.detach();
-    stopSignerNode(node);
+    await (node as typeof node & { shutdown: () => Promise<void> }).shutdown();
   }
 }
 
