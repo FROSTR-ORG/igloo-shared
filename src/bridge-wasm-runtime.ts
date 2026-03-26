@@ -199,9 +199,13 @@ function getExtensionAssetUrl(path: string) {
 }
 
 function useBrowserAssetUrls() {
+  const maybeProcess =
+    typeof globalThis === 'object' && 'process' in globalThis
+      ? (globalThis as { process?: { versions?: { node?: string } } }).process
+      : undefined;
   return (
     typeof window !== 'undefined' &&
-    !(typeof process !== 'undefined' && process.versions?.node)
+    !maybeProcess?.versions?.node
   );
 }
 

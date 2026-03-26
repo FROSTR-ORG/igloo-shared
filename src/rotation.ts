@@ -6,9 +6,10 @@ import {
   deriveProfileIdFromShareSecret,
   encodeBfOnboardPackage,
   type BrowserOnboardPackagePayload,
-  type BrowserProfileGroupMember,
+  groupPublicKeyFromPackage,
   type BrowserProfilePackagePayload,
   type BrowserSharePackagePayload,
+  xOnlyFromCompressedPubkey,
 } from './profile-package';
 import {
   fetchLatestEncryptedProfileBackup,
@@ -42,7 +43,7 @@ export type BrowserRotationDraft = {
   threshold: number;
   count: number;
   keysetName: string;
-  members: BrowserProfileGroupMember[];
+  members: Array<{ idx: number; pubkey: string }>;
   shares: Array<{
     memberIndex: number;
     shareSecret: string;
@@ -97,23 +98,22 @@ function publicKeyFromSecret(secretHex: string) {
 
 function groupJsonFromProfilePayload(payload: BrowserProfilePackagePayload) {
   return JSON.stringify({
-    group_pk: payload.group.groupPublicKey,
-    threshold: payload.group.threshold,
-    members: payload.group.members.map((member) => ({
-      idx: member.index,
-      pubkey: `02${member.sharePublicKey}`,
-    })),
+    group_pk: payload.groupPackage.groupPk,
+    threshold: payload.groupPackage.threshold,
+    members: payload.groupPackage.members,
   });
 }
 
 function shareJsonFromProfilePayload(payload: BrowserProfilePackagePayload) {
   const sharePublicKey = publicKeyFromSecret(payload.device.shareSecret);
-  const member = payload.group.members.find((candidate) => candidate.sharePublicKey === sharePublicKey);
+  const member = payload.groupPackage.members.find(
+    (candidate) => xOnlyFromCompressedPubkey(candidate.pubkey) === sharePublicKey,
+  );
   if (!member) {
     throw new Error('Profile share secret does not match any group member.');
   }
   return JSON.stringify({
-    idx: member.index,
+    idx: member.idx,
     seckey: payload.device.shareSecret,
   });
 }
@@ -146,14 +146,14 @@ export async function buildRotationDraft(input: {
     throw new Error('At least one rotation source is required.');
   }
   const [first, ...rest] = input.sources;
-  if (input.sources.length < first.profile.group.threshold) {
-    throw new Error(`Rotation requires at least ${first.profile.group.threshold} current shares.`);
+  if (input.sources.length < first.profile.groupPackage.threshold) {
+    throw new Error(`Rotation requires at least ${first.profile.groupPackage.threshold} current shares.`);
   }
   for (const source of rest) {
     if (source.groupId !== first.groupId) {
       throw new Error('Rotation sources must all belong to the same current group configuration.');
     }
-    if (source.profile.group.groupPublicKey !== first.profile.group.groupPublicKey) {
+    if (groupPublicKeyFromPackage(source.profile.groupPackage) !== groupPublicKeyFromPackage(first.profile.groupPackage)) {
       throw new Error('Rotation sources must all belong to the same group public key.');
     }
   }
@@ -170,16 +170,14 @@ export async function buildRotationDraft(input: {
     ),
   ) as RotatedKeysetBundleExport;
 
-  if (normalizeHex32(rotated.next.group.group_pk, 'rotated group public key') !== first.profile.group.groupPublicKey) {
+  if (normalizeHex32(rotated.next.group.group_pk, 'rotated group public key') !== groupPublicKeyFromPackage(first.profile.groupPackage)) {
     throw new Error('Rotation changed the group public key.');
   }
 
-  const members = rotated.next.group.members.map(
-    (member): BrowserProfileGroupMember => ({
-      index: member.idx,
-      sharePublicKey: normalizeHex32(member.pubkey.slice(2), 'rotated share public key'),
-    }),
-  );
+  const members = rotated.next.group.members.map((member) => ({
+    idx: member.idx,
+    pubkey: member.pubkey.toLowerCase(),
+  }));
 
   return {
     sourceGroupId: normalizeHex32(rotated.previous_group_id, 'source group id'),
@@ -187,7 +185,7 @@ export async function buildRotationDraft(input: {
     groupPublicKey: normalizeHex32(rotated.next.group.group_pk, 'group public key'),
     threshold: rotated.next.group.threshold,
     count: rotated.next.group.members.length,
-    keysetName: input.keysetName?.trim() || first.profile.group.keysetName,
+    keysetName: input.keysetName?.trim() || first.profile.keysetName,
     members,
     shares: await Promise.all(
       rotated.next.shares.map(async (share) => ({
@@ -237,6 +235,7 @@ export async function buildRotationProfilePayload(
   return {
     profileId: await deriveProfileIdFromShareSecret(share.shareSecret),
     version: 1,
+    keysetName: draft.keysetName,
     device: {
       name: assignment.label.trim(),
       shareSecret: share.shareSecret,
@@ -244,11 +243,9 @@ export async function buildRotationProfilePayload(
       remotePeerPolicyObservations: [],
       relays,
     },
-    group: {
-      keysetName: draft.keysetName,
-      groupPublicKey: draft.groupPublicKey,
+    groupPackage: {
+      groupPk: draft.groupPublicKey,
       threshold: draft.threshold,
-      totalCount: draft.count,
       members: draft.members,
     },
   } satisfies BrowserProfilePackagePayload;

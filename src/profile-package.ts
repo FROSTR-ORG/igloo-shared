@@ -46,9 +46,15 @@ export type BrowserRemotePeerPolicyObservation = {
   profile: BrowserPeerScopedPolicyProfile;
 };
 
-export type BrowserProfileGroupMember = {
-  index: number;
-  sharePublicKey: string;
+export type BrowserGroupPackageMember = {
+  idx: number;
+  pubkey: string;
+};
+
+export type BrowserGroupPackage = {
+  groupPk: string;
+  threshold: number;
+  members: BrowserGroupPackageMember[];
 };
 
 export type BrowserSharePackagePayload = {
@@ -63,6 +69,7 @@ export type BrowserOnboardPackagePayload = BrowserSharePackagePayload & {
 export type BrowserProfilePackagePayload = {
   profileId: string;
   version: number;
+  keysetName: string;
   device: {
     name: string;
     shareSecret: string;
@@ -70,13 +77,7 @@ export type BrowserProfilePackagePayload = {
     remotePeerPolicyObservations: BrowserRemotePeerPolicyObservation[];
     relays: string[];
   };
-  group: {
-    keysetName: string;
-    groupPublicKey: string;
-    threshold: number;
-    totalCount: number;
-    members: BrowserProfileGroupMember[];
-  };
+  groupPackage: BrowserGroupPackage;
 };
 
 export function shortProfileId(profileId: string) {
@@ -104,6 +105,7 @@ export function buildProfileDownloadFilename(
 
 export type BrowserEncryptedProfileBackup = {
   version: number;
+  keysetName: string;
   device: {
     name: string;
     sharePublicKey: string;
@@ -111,13 +113,7 @@ export type BrowserEncryptedProfileBackup = {
     remotePeerPolicyObservations: BrowserRemotePeerPolicyObservation[];
     relays: string[];
   };
-  group: {
-    keysetName: string;
-    groupPublicKey: string;
-    threshold: number;
-    totalCount: number;
-    members: BrowserProfileGroupMember[];
-  };
+  groupPackage: BrowserGroupPackage;
 };
 
 type RustProfilePackagePair = {
@@ -160,8 +156,8 @@ type RustRemotePeerPolicyObservation = {
 };
 
 type RustGroupMember = {
-  index: number;
-  share_public_key: string;
+  idx: number;
+  pubkey: string;
 };
 
 type RustSharePayload = {
@@ -176,6 +172,7 @@ type RustOnboardPayload = RustSharePayload & {
 type RustProfilePayload = {
   profile_id: string;
   version: number;
+  keyset_name: string;
   device: {
     name: string;
     share_secret: string;
@@ -183,17 +180,16 @@ type RustProfilePayload = {
     remote_peer_policy_observations: RustRemotePeerPolicyObservation[];
     relays: string[];
   };
-  group: {
-    keyset_name: string;
-    group_public_key: string;
+  group_package: {
+    group_pk: string;
     threshold: number;
-    total_count: number;
     members: RustGroupMember[];
   };
 };
 
 type RustEncryptedProfileBackup = {
   version: number;
+  keyset_name: string;
   device: {
     name: string;
     share_public_key: string;
@@ -201,7 +197,7 @@ type RustEncryptedProfileBackup = {
     remote_peer_policy_observations: RustRemotePeerPolicyObservation[];
     relays: string[];
   };
-  group: RustProfilePayload['group'];
+  group_package: RustProfilePayload['group_package'];
 };
 
 function hexToBytes(hex: string) {
@@ -237,6 +233,41 @@ export async function deriveProfileIdFromShareSecret(shareSecret: string) {
 export async function deriveProfileIdFromSharePublicKey(sharePubkey: string) {
   const api = await getWasmProfilePackageApi();
   return api.derive_profile_id_from_share_pubkey(sharePubkey);
+}
+
+function normalizeCompressedPubkey(value: string, label: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!/^(02|03)[0-9a-f]{64}$/.test(normalized)) {
+    throw new Error(`Invalid ${label}.`);
+  }
+  return normalized;
+}
+
+export function xOnlyFromCompressedPubkey(value: string) {
+  return normalizeCompressedPubkey(value, 'compressed pubkey').slice(2);
+}
+
+export function groupPublicKeyFromPackage(groupPackage: BrowserGroupPackage) {
+  return groupPackage.groupPk.trim().toLowerCase();
+}
+
+export function totalCountFromGroupPackage(groupPackage: BrowserGroupPackage) {
+  return groupPackage.members.length;
+}
+
+export function groupPackageToWireValue(groupPackage: BrowserGroupPackage) {
+  return {
+    group_pk: groupPackage.groupPk,
+    threshold: groupPackage.threshold,
+    members: groupPackage.members.map((member) => ({
+      idx: member.idx,
+      pubkey: member.pubkey,
+    })),
+  };
+}
+
+export function groupPackageToWireJson(groupPackage: BrowserGroupPackage) {
+  return JSON.stringify(groupPackageToWireValue(groupPackage), null, 2);
 }
 
 function toRustSharePayload(payload: BrowserSharePackagePayload): RustSharePayload {
@@ -337,6 +368,7 @@ function toRustProfilePayload(payload: BrowserProfilePackagePayload): RustProfil
   return {
     profile_id: payload.profileId,
     version: payload.version,
+    keyset_name: payload.keysetName,
     device: {
       name: payload.device.name,
       share_secret: payload.device.shareSecret,
@@ -346,14 +378,12 @@ function toRustProfilePayload(payload: BrowserProfilePackagePayload): RustProfil
       ),
       relays: payload.device.relays,
     },
-    group: {
-      keyset_name: payload.group.keysetName,
-      group_public_key: payload.group.groupPublicKey,
-      threshold: payload.group.threshold,
-      total_count: payload.group.totalCount,
-      members: payload.group.members.map((member) => ({
-        index: member.index,
-        share_public_key: member.sharePublicKey,
+    group_package: {
+      group_pk: payload.groupPackage.groupPk,
+      threshold: payload.groupPackage.threshold,
+      members: payload.groupPackage.members.map((member) => ({
+        idx: member.idx,
+        pubkey: member.pubkey,
       })),
     },
   };
@@ -363,6 +393,7 @@ function fromRustProfilePayload(payload: RustProfilePayload): BrowserProfilePack
   return {
     profileId: payload.profile_id,
     version: payload.version,
+    keysetName: payload.keyset_name,
     device: {
       name: payload.device.name,
       shareSecret: payload.device.share_secret,
@@ -374,14 +405,12 @@ function fromRustProfilePayload(payload: RustProfilePayload): BrowserProfilePack
       ),
       relays: payload.device.relays,
     },
-    group: {
-      keysetName: payload.group.keyset_name,
-      groupPublicKey: payload.group.group_public_key,
-      threshold: payload.group.threshold,
-      totalCount: payload.group.total_count,
-      members: payload.group.members.map((member) => ({
-        index: member.index,
-        sharePublicKey: member.share_public_key,
+    groupPackage: {
+      groupPk: payload.group_package.group_pk,
+      threshold: payload.group_package.threshold,
+      members: payload.group_package.members.map((member) => ({
+        idx: member.idx,
+        pubkey: member.pubkey,
       })),
     },
   };
@@ -390,6 +419,7 @@ function fromRustProfilePayload(payload: RustProfilePayload): BrowserProfilePack
 function fromRustEncryptedProfileBackup(backup: RustEncryptedProfileBackup): BrowserEncryptedProfileBackup {
   return {
     version: backup.version,
+    keysetName: backup.keyset_name,
     device: {
       name: backup.device.name,
       sharePublicKey: backup.device.share_public_key,
@@ -401,14 +431,12 @@ function fromRustEncryptedProfileBackup(backup: RustEncryptedProfileBackup): Bro
       ),
       relays: backup.device.relays,
     },
-    group: {
-      keysetName: backup.group.keyset_name,
-      groupPublicKey: backup.group.group_public_key,
-      threshold: backup.group.threshold,
-      totalCount: backup.group.total_count,
-      members: backup.group.members.map((member) => ({
-        index: member.index,
-        sharePublicKey: member.share_public_key,
+    groupPackage: {
+      groupPk: backup.group_package.group_pk,
+      threshold: backup.group_package.threshold,
+      members: backup.group_package.members.map((member) => ({
+        idx: member.idx,
+        pubkey: member.pubkey,
       })),
     },
   };
@@ -417,6 +445,7 @@ function fromRustEncryptedProfileBackup(backup: RustEncryptedProfileBackup): Bro
 function toRustEncryptedProfileBackup(backup: BrowserEncryptedProfileBackup): RustEncryptedProfileBackup {
   return {
     version: backup.version,
+    keyset_name: backup.keysetName,
     device: {
       name: backup.device.name,
       share_public_key: backup.device.sharePublicKey,
@@ -428,14 +457,12 @@ function toRustEncryptedProfileBackup(backup: BrowserEncryptedProfileBackup): Ru
       ),
       relays: backup.device.relays,
     },
-    group: {
-      keyset_name: backup.group.keysetName,
-      group_public_key: backup.group.groupPublicKey,
-      threshold: backup.group.threshold,
-      total_count: backup.group.totalCount,
-      members: backup.group.members.map((member) => ({
-        index: member.index,
-        share_public_key: member.sharePublicKey,
+    group_package: {
+      group_pk: backup.groupPackage.groupPk,
+      threshold: backup.groupPackage.threshold,
+      members: backup.groupPackage.members.map((member) => ({
+        idx: member.idx,
+        pubkey: member.pubkey,
       })),
     },
   };
