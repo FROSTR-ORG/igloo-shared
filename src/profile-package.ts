@@ -6,14 +6,6 @@ export type BrowserProtectedPackageKind = 'bfprofile' | 'bfshare' | 'bfonboard';
 
 export type BrowserPolicyOverrideValue = 'unset' | 'allow' | 'deny';
 
-export type BrowserMethodPolicy = {
-  echo: boolean;
-  ping: boolean;
-  onboard: boolean;
-  sign: boolean;
-  ecdh: boolean;
-};
-
 export type BrowserMethodPolicyOverride = {
   echo: BrowserPolicyOverrideValue;
   ping: BrowserPolicyOverrideValue;
@@ -32,26 +24,13 @@ export type BrowserManualPeerPolicyOverride = {
   policy: BrowserPeerPolicyOverride;
 };
 
-export type BrowserPeerScopedPolicyProfile = {
-  forPeer: string;
-  revision: number;
-  updated: number;
-  blockAll: boolean;
-  request: BrowserMethodPolicy;
-  respond: BrowserMethodPolicy;
-};
-
-export type BrowserRemotePeerPolicyObservation = {
-  pubkey: string;
-  profile: BrowserPeerScopedPolicyProfile;
-};
-
 export type BrowserGroupPackageMember = {
   idx: number;
   pubkey: string;
 };
 
 export type BrowserGroupPackage = {
+  groupName: string;
   groupPk: string;
   threshold: number;
   members: BrowserGroupPackageMember[];
@@ -69,12 +48,10 @@ export type BrowserOnboardPackagePayload = BrowserSharePackagePayload & {
 export type BrowserProfilePackagePayload = {
   profileId: string;
   version: number;
-  keysetName: string;
   device: {
     name: string;
     shareSecret: string;
     manualPeerPolicyOverrides: BrowserManualPeerPolicyOverride[];
-    remotePeerPolicyObservations: BrowserRemotePeerPolicyObservation[];
     relays: string[];
   };
   groupPackage: BrowserGroupPackage;
@@ -105,12 +82,10 @@ export function buildProfileDownloadFilename(
 
 export type BrowserEncryptedProfileBackup = {
   version: number;
-  keysetName: string;
   device: {
     name: string;
     sharePublicKey: string;
     manualPeerPolicyOverrides: BrowserManualPeerPolicyOverride[];
-    remotePeerPolicyObservations: BrowserRemotePeerPolicyObservation[];
     relays: string[];
   };
   groupPackage: BrowserGroupPackage;
@@ -120,8 +95,6 @@ type RustProfilePackagePair = {
   profile_string: string;
   share_string: string;
 };
-
-type RustMethodPolicy = BrowserMethodPolicy;
 
 type RustMethodPolicyOverride = {
   echo: BrowserPolicyOverrideValue;
@@ -141,20 +114,6 @@ type RustManualPeerPolicyOverride = {
   policy: RustPeerPolicyOverride;
 };
 
-type RustPeerScopedPolicyProfile = {
-  for_peer: string;
-  revision: number;
-  updated: number;
-  block_all: boolean;
-  request: RustMethodPolicy;
-  respond: RustMethodPolicy;
-};
-
-type RustRemotePeerPolicyObservation = {
-  pubkey: string;
-  profile: RustPeerScopedPolicyProfile;
-};
-
 type RustGroupMember = {
   idx: number;
   pubkey: string;
@@ -172,15 +131,14 @@ type RustOnboardPayload = RustSharePayload & {
 type RustProfilePayload = {
   profile_id: string;
   version: number;
-  keyset_name: string;
   device: {
     name: string;
     share_secret: string;
     manual_peer_policy_overrides: RustManualPeerPolicyOverride[];
-    remote_peer_policy_observations: RustRemotePeerPolicyObservation[];
     relays: string[];
   };
   group_package: {
+    group_name: string;
     group_pk: string;
     threshold: number;
     members: RustGroupMember[];
@@ -189,12 +147,10 @@ type RustProfilePayload = {
 
 type RustEncryptedProfileBackup = {
   version: number;
-  keyset_name: string;
   device: {
     name: string;
     share_public_key: string;
     manual_peer_policy_overrides: RustManualPeerPolicyOverride[];
-    remote_peer_policy_observations: RustRemotePeerPolicyObservation[];
     relays: string[];
   };
   group_package: RustProfilePayload['group_package'];
@@ -251,12 +207,17 @@ export function groupPublicKeyFromPackage(groupPackage: BrowserGroupPackage) {
   return groupPackage.groupPk.trim().toLowerCase();
 }
 
+export function groupNameFromPackage(groupPackage: BrowserGroupPackage) {
+  return groupPackage.groupName.trim();
+}
+
 export function totalCountFromGroupPackage(groupPackage: BrowserGroupPackage) {
   return groupPackage.members.length;
 }
 
 export function groupPackageToWireValue(groupPackage: BrowserGroupPackage) {
   return {
+    group_name: groupPackage.groupName,
     group_pk: groupPackage.groupPk,
     threshold: groupPackage.threshold,
     members: groupPackage.members.map((member) => ({
@@ -332,53 +293,18 @@ function fromRustManualPeerPolicyOverride(
   };
 }
 
-function toRustRemotePeerPolicyObservation(
-  policy: BrowserRemotePeerPolicyObservation,
-): RustRemotePeerPolicyObservation {
-  return {
-    pubkey: policy.pubkey,
-    profile: {
-      for_peer: policy.profile.forPeer,
-      revision: policy.profile.revision,
-      updated: policy.profile.updated,
-      block_all: policy.profile.blockAll,
-      request: { ...policy.profile.request },
-      respond: { ...policy.profile.respond },
-    },
-  };
-}
-
-function fromRustRemotePeerPolicyObservation(
-  policy: RustRemotePeerPolicyObservation,
-): BrowserRemotePeerPolicyObservation {
-  return {
-    pubkey: policy.pubkey,
-    profile: {
-      forPeer: policy.profile.for_peer,
-      revision: policy.profile.revision,
-      updated: policy.profile.updated,
-      blockAll: policy.profile.block_all,
-      request: { ...policy.profile.request },
-      respond: { ...policy.profile.respond },
-    },
-  };
-}
-
 function toRustProfilePayload(payload: BrowserProfilePackagePayload): RustProfilePayload {
   return {
     profile_id: payload.profileId,
     version: payload.version,
-    keyset_name: payload.keysetName,
     device: {
       name: payload.device.name,
       share_secret: payload.device.shareSecret,
       manual_peer_policy_overrides: payload.device.manualPeerPolicyOverrides.map(toRustManualPeerPolicyOverride),
-      remote_peer_policy_observations: payload.device.remotePeerPolicyObservations.map(
-        toRustRemotePeerPolicyObservation,
-      ),
       relays: payload.device.relays,
     },
     group_package: {
+      group_name: payload.groupPackage.groupName,
       group_pk: payload.groupPackage.groupPk,
       threshold: payload.groupPackage.threshold,
       members: payload.groupPackage.members.map((member) => ({
@@ -393,19 +319,16 @@ function fromRustProfilePayload(payload: RustProfilePayload): BrowserProfilePack
   return {
     profileId: payload.profile_id,
     version: payload.version,
-    keysetName: payload.keyset_name,
     device: {
       name: payload.device.name,
       shareSecret: payload.device.share_secret,
       manualPeerPolicyOverrides: payload.device.manual_peer_policy_overrides.map(
         fromRustManualPeerPolicyOverride,
       ),
-      remotePeerPolicyObservations: payload.device.remote_peer_policy_observations.map(
-        fromRustRemotePeerPolicyObservation,
-      ),
       relays: payload.device.relays,
     },
     groupPackage: {
+      groupName: payload.group_package.group_name,
       groupPk: payload.group_package.group_pk,
       threshold: payload.group_package.threshold,
       members: payload.group_package.members.map((member) => ({
@@ -419,19 +342,16 @@ function fromRustProfilePayload(payload: RustProfilePayload): BrowserProfilePack
 function fromRustEncryptedProfileBackup(backup: RustEncryptedProfileBackup): BrowserEncryptedProfileBackup {
   return {
     version: backup.version,
-    keysetName: backup.keyset_name,
     device: {
       name: backup.device.name,
       sharePublicKey: backup.device.share_public_key,
       manualPeerPolicyOverrides: backup.device.manual_peer_policy_overrides.map(
         fromRustManualPeerPolicyOverride,
       ),
-      remotePeerPolicyObservations: backup.device.remote_peer_policy_observations.map(
-        fromRustRemotePeerPolicyObservation,
-      ),
       relays: backup.device.relays,
     },
     groupPackage: {
+      groupName: backup.group_package.group_name,
       groupPk: backup.group_package.group_pk,
       threshold: backup.group_package.threshold,
       members: backup.group_package.members.map((member) => ({
@@ -445,19 +365,16 @@ function fromRustEncryptedProfileBackup(backup: RustEncryptedProfileBackup): Bro
 function toRustEncryptedProfileBackup(backup: BrowserEncryptedProfileBackup): RustEncryptedProfileBackup {
   return {
     version: backup.version,
-    keyset_name: backup.keysetName,
     device: {
       name: backup.device.name,
       share_public_key: backup.device.sharePublicKey,
       manual_peer_policy_overrides: backup.device.manualPeerPolicyOverrides.map(
         toRustManualPeerPolicyOverride,
       ),
-      remote_peer_policy_observations: backup.device.remotePeerPolicyObservations.map(
-        toRustRemotePeerPolicyObservation,
-      ),
       relays: backup.device.relays,
     },
     group_package: {
+      group_name: backup.groupPackage.groupName,
       group_pk: backup.groupPackage.groupPk,
       threshold: backup.groupPackage.threshold,
       members: backup.groupPackage.members.map((member) => ({

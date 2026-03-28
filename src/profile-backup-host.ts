@@ -136,12 +136,10 @@ export async function recoverProfileFromSharePackage(
   const profile: BrowserProfilePackagePayload = {
     profileId: await deriveProfileIdFromShareSecret(share.shareSecret),
     version: backup.version,
-    keysetName: backup.keysetName,
     device: {
       name: backup.device.name,
       shareSecret: share.shareSecret,
       manualPeerPolicyOverrides: backup.device.manualPeerPolicyOverrides,
-      remotePeerPolicyObservations: backup.device.remotePeerPolicyObservations,
       relays: backup.device.relays,
     },
     groupPackage: backup.groupPackage,

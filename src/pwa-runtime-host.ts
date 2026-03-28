@@ -27,7 +27,7 @@ const NONCE_SNAPSHOT_WAIT_TIMEOUT_MS = 5_000;
 const NONCE_SNAPSHOT_POLL_INTERVAL_MS = 100;
 
 export type BrowserStoredProfile = {
-  keysetName?: string;
+  groupName?: string;
   relays: string[];
   groupPublicKey?: string;
   sharePublicKey?: string;
@@ -80,7 +80,7 @@ type BrowserRuntimeTestHooks = {
   connectOnboardingPackageAndCaptureProfile?: (input: {
     packageText: string;
     password: string;
-    keysetName?: string;
+    groupName?: string;
     signerSettings?: Partial<SignerSettings>;
   }) => Promise<BrowserOnboardingResult>;
   startPersistedBrowserRuntimeSession?: (
@@ -208,7 +208,7 @@ function buildSessionSnapshot(node: NodeWithEvents): BrowserRuntimeSessionSnapsh
 export async function connectOnboardingPackageAndCaptureProfile(input: {
   packageText: string;
   password: string;
-  keysetName?: string;
+  groupName?: string;
   signerSettings?: Partial<SignerSettings>;
 }): Promise<BrowserOnboardingResult> {
   if (browserRuntimeTestHooks?.connectOnboardingPackageAndCaptureProfile) {
@@ -235,7 +235,7 @@ export async function connectOnboardingPackageAndCaptureProfile(input: {
     return {
       decoded,
       profile: {
-        keysetName: input.keysetName,
+        groupName: input.groupName,
         relays: decoded.relays,
         groupPublicKey: getPublicKeyFromNode(node),
         sharePublicKey: decoded.publicKey,

@@ -42,7 +42,7 @@ export type BrowserRotationDraft = {
   groupPublicKey: string;
   threshold: number;
   count: number;
-  keysetName: string;
+  groupName: string;
   members: Array<{ idx: number; pubkey: string }>;
   shares: Array<{
     memberIndex: number;
@@ -98,6 +98,7 @@ function publicKeyFromSecret(secretHex: string) {
 
 function groupJsonFromProfilePayload(payload: BrowserProfilePackagePayload) {
   return JSON.stringify({
+    group_name: payload.groupPackage.groupName,
     group_pk: payload.groupPackage.groupPk,
     threshold: payload.groupPackage.threshold,
     members: payload.groupPackage.members,
@@ -140,7 +141,7 @@ export async function buildRotationDraft(input: {
   sources: BrowserRotationRecoveredSource[];
   threshold: number;
   count: number;
-  keysetName?: string | null;
+  groupName?: string | null;
 }) {
   if (input.sources.length === 0) {
     throw new Error('At least one rotation source is required.');
@@ -185,7 +186,7 @@ export async function buildRotationDraft(input: {
     groupPublicKey: normalizeHex32(rotated.next.group.group_pk, 'group public key'),
     threshold: rotated.next.group.threshold,
     count: rotated.next.group.members.length,
-    keysetName: input.keysetName?.trim() || first.profile.keysetName,
+    groupName: input.groupName?.trim() || first.profile.groupPackage.groupName,
     members,
     shares: await Promise.all(
       rotated.next.shares.map(async (share) => ({
@@ -205,7 +206,7 @@ export async function buildRotationDraftFromBfshares(input: {
   }>;
   threshold: number;
   count: number;
-  keysetName?: string | null;
+  groupName?: string | null;
   maxWait?: number;
 }) {
   const recoveredSources = await Promise.all(
@@ -219,7 +220,7 @@ export async function buildRotationDraftFromBfshares(input: {
     sources: recoveredSources,
     threshold: input.threshold,
     count: input.count,
-    keysetName: input.keysetName,
+    groupName: input.groupName,
   });
 }
 
@@ -235,15 +236,14 @@ export async function buildRotationProfilePayload(
   return {
     profileId: await deriveProfileIdFromShareSecret(share.shareSecret),
     version: 1,
-    keysetName: draft.keysetName,
     device: {
       name: assignment.label.trim(),
       shareSecret: share.shareSecret,
       manualPeerPolicyOverrides: [],
-      remotePeerPolicyObservations: [],
       relays,
     },
     groupPackage: {
+      groupName: draft.groupName,
       groupPk: draft.groupPublicKey,
       threshold: draft.threshold,
       members: draft.members,
