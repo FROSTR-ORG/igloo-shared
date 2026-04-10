@@ -6,7 +6,7 @@
 
 ```bash
 npm run test:typecheck
-npm run test:bridge-wasm-exports
+npm run test:browser-wasm-exports
 ```
 
 These checks are the main guardrails for:

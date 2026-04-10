@@ -6,7 +6,7 @@ This file explains the editing boundaries for `igloo-shared`.
 
 `igloo-shared` owns:
 
-- shared browser/runtime adapter code
+- shared signer/runtime core and host-neutral contracts
 - shared package and backup helpers
 - shared rotation/adoption helpers
 - shared observability and runtime-state helper code

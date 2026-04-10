@@ -12,7 +12,10 @@ else
 fi
 BIFROST_RS_DIR="${RESOLVED_BIFROST_RS_DIR}"
 WASM_PKG_DIR="${IGLOO_SHARED_ROOT}/public/wasm"
-WASM_OUT_NAME="bifrost_bridge_wasm"
+WASM_MODULES=(
+  "crates/bifrost-bridge-wasm:bifrost_bridge_wasm"
+  "crates/bifrost-profile-wasm:bifrost_profile_wasm"
+)
 
 if ! command -v wasm-pack >/dev/null 2>&1; then
   echo "error: wasm-pack is required (https://rustwasm.github.io/wasm-pack/installer/)" >&2
@@ -27,7 +30,7 @@ fi
 if [[ ! -f "${BIFROST_RS_DIR}/Cargo.toml" ]]; then
   echo "error: bifrost-rs workspace not found at ${BIFROST_RS_DIR}" >&2
   echo "default workspace path: ${DEFAULT_BIFROST_RS_DIR}" >&2
-  echo "override with: BIFROST_RS_DIR=/absolute/path/to/bifrost-rs npm run build:bridge-wasm" >&2
+  echo "override with: BIFROST_RS_DIR=/absolute/path/to/bifrost-rs npm run build:browser-wasm" >&2
   exit 1
 fi
 
@@ -35,28 +38,34 @@ mkdir -p "${WASM_PKG_DIR}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
-(
-  cd "${BIFROST_RS_DIR}"
-  wasm-pack build crates/bifrost-bridge-wasm \
-    --target web \
-    --out-dir "${TMP_DIR}" \
-    --out-name "${WASM_OUT_NAME}"
-)
+for module_spec in "${WASM_MODULES[@]}"; do
+  crate_path="${module_spec%%:*}"
+  out_name="${module_spec##*:}"
+  out_dir="${TMP_DIR}/${out_name}"
 
-cp "${TMP_DIR}/${WASM_OUT_NAME}.js" "${WASM_PKG_DIR}/${WASM_OUT_NAME}.js"
-cp "${TMP_DIR}/${WASM_OUT_NAME}.d.ts" "${WASM_PKG_DIR}/${WASM_OUT_NAME}.d.ts"
-cp "${TMP_DIR}/${WASM_OUT_NAME}_bg.wasm" "${WASM_PKG_DIR}/${WASM_OUT_NAME}_bg.wasm"
-cat > "${WASM_PKG_DIR}/${WASM_OUT_NAME}_loader.mjs" <<'EOF'
-import init, * as wasm from './bifrost_bridge_wasm.js';
+  (
+    cd "${BIFROST_RS_DIR}"
+    wasm-pack build "${crate_path}" \
+      --target web \
+      --out-dir "${out_dir}" \
+      --out-name "${out_name}"
+  )
 
-const wasmUrl = new URL('./bifrost_bridge_wasm_bg.wasm', import.meta.url);
+  cp "${out_dir}/${out_name}.js" "${WASM_PKG_DIR}/${out_name}.js"
+  cp "${out_dir}/${out_name}.d.ts" "${WASM_PKG_DIR}/${out_name}.d.ts"
+  cp "${out_dir}/${out_name}_bg.wasm" "${WASM_PKG_DIR}/${out_name}_bg.wasm"
+  cat > "${WASM_PKG_DIR}/${out_name}_loader.mjs" <<EOF
+import init, * as wasm from './${out_name}.js';
 
-export default async function loadBridgeWasm(options = {}) {
+const wasmUrl = new URL('./${out_name}_bg.wasm', import.meta.url);
+
+export default async function loadWasm(options = {}) {
   await init({ module_or_path: options.module_or_path ?? wasmUrl });
   return wasm;
 }
 
-export * from './bifrost_bridge_wasm.js';
+export * from './${out_name}.js';
 EOF
+done
 
 echo "ok: copied wasm artifacts to ${WASM_PKG_DIR}"

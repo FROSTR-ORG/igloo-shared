@@ -1,6 +1,12 @@
-import { getPublicKey, type Event } from 'nostr-tools';
+import type { Event } from 'nostr-tools';
 
 import { getWasmKeysetApi } from './bridge-wasm-runtime';
+import {
+  groupJsonFromPayload,
+  normalizeHex32,
+  publicKeyFromSecret,
+  shareJsonFromPayload,
+} from './browser-profile';
 import {
   createEncryptedProfileBackup,
   deriveProfileIdFromShareSecret,
@@ -9,7 +15,6 @@ import {
   groupPublicKeyFromPackage,
   type BrowserProfilePackagePayload,
   type BrowserSharePackagePayload,
-  xOnlyFromCompressedPubkey,
 } from './profile-package';
 import {
   fetchLatestEncryptedProfileBackup,
@@ -67,14 +72,6 @@ export type RotationDistributionArtifact = {
   onboardPackageText: string;
 };
 
-function normalizeHex32(value: string, label: string) {
-  const normalized = value.trim().toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(normalized)) {
-    throw new Error(`Invalid ${label}.`);
-  }
-  return normalized;
-}
-
 function normalizeRelays(relays: string[]) {
   const normalized = relays.map((relay) => relay.trim()).filter(Boolean);
   if (!normalized.length) {
@@ -83,45 +80,9 @@ function normalizeRelays(relays: string[]) {
   return normalized;
 }
 
-function hexToBytes(hex: string) {
-  const normalized = normalizeHex32(hex, 'hex string');
-  const bytes = new Uint8Array(normalized.length / 2);
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16);
-  }
-  return bytes;
-}
-
-function publicKeyFromSecret(secretHex: string) {
-  return getPublicKey(hexToBytes(secretHex)).toLowerCase();
-}
-
-function groupJsonFromProfilePayload(payload: BrowserProfilePackagePayload) {
-  return JSON.stringify({
-    group_name: payload.groupPackage.groupName,
-    group_pk: payload.groupPackage.groupPk,
-    threshold: payload.groupPackage.threshold,
-    members: payload.groupPackage.members,
-  });
-}
-
-function shareJsonFromProfilePayload(payload: BrowserProfilePackagePayload) {
-  const sharePublicKey = publicKeyFromSecret(payload.device.shareSecret);
-  const member = payload.groupPackage.members.find(
-    (candidate) => xOnlyFromCompressedPubkey(candidate.pubkey) === sharePublicKey,
-  );
-  if (!member) {
-    throw new Error('Profile share secret does not match any group member.');
-  }
-  return JSON.stringify({
-    idx: member.idx,
-    seckey: payload.device.shareSecret,
-  });
-}
-
 export async function deriveGroupIdFromProfilePayload(profile: BrowserProfilePackagePayload) {
   const api = await getWasmKeysetApi();
-  return api.derive_group_id(groupJsonFromProfilePayload(profile));
+  return api.derive_group_id(groupJsonFromPayload(profile));
 }
 
 export async function recoverRotationSourceFromBfshare(
@@ -163,8 +124,8 @@ export async function buildRotationDraft(input: {
   const rotated = JSON.parse(
     api.rotate_keyset_bundle(
       JSON.stringify({
-        group: JSON.parse(groupJsonFromProfilePayload(first.profile)),
-        shares: input.sources.map((source) => JSON.parse(shareJsonFromProfilePayload(source.profile))),
+        group: JSON.parse(groupJsonFromPayload(first.profile)),
+        shares: input.sources.map((source) => JSON.parse(shareJsonFromPayload(source.profile))),
         threshold: input.threshold,
         count: input.count,
       }),

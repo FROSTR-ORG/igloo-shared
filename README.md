@@ -2,7 +2,7 @@
 
 Shared TypeScript runtime and package-contract layer for the Igloo hosts.
 
-`igloo-shared` provides the shared browser-facing runtime adapter, package handling, rotation helpers, and observability utilities consumed by the browser and desktop hosts.
+`igloo-shared` provides the shared signer core, package handling, rotation helpers, signer settings, bridge-WASM boundary, and observability utilities consumed by the browser hosts.
 
 ## Status
 
@@ -10,7 +10,7 @@ Shared TypeScript runtime and package-contract layer for the Igloo hosts.
 
 ## Owns
 
-- shared browser/runtime host contracts
+- shared signer/runtime core and host-neutral contracts
 - package and backup helpers used by Igloo hosts
 - rotation and adoption helpers used by browser and desktop hosts
 - bridge-WASM integration boundary for the browser-facing stack
@@ -18,6 +18,7 @@ Shared TypeScript runtime and package-contract layer for the Igloo hosts.
 ## Does Not Own
 
 - app-specific UI and workflow composition
+- host lifecycle adapters for Chrome or the web app
 - desktop-native host logic
 - extension-specific or PWA-specific shell behavior
 
@@ -26,13 +27,13 @@ Shared TypeScript runtime and package-contract layer for the Igloo hosts.
 ```bash
 npm install
 npm run test:typecheck
-npm run test:bridge-wasm-exports
+npm run test:browser-wasm-exports
 ```
 
 Build bridge artifacts when needed:
 
 ```bash
-npm run build:bridge-wasm
+npm run build:browser-wasm
 ```
 
 ## Project Docs

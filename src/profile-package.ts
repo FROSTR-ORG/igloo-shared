@@ -91,69 +91,9 @@ export type BrowserEncryptedProfileBackup = {
   groupPackage: BrowserGroupPackage;
 };
 
-type RustProfilePackagePair = {
-  profile_string: string;
-  share_string: string;
-};
-
-type RustMethodPolicyOverride = {
-  echo: BrowserPolicyOverrideValue;
-  ping: BrowserPolicyOverrideValue;
-  onboard: BrowserPolicyOverrideValue;
-  sign: BrowserPolicyOverrideValue;
-  ecdh: BrowserPolicyOverrideValue;
-};
-
-type RustPeerPolicyOverride = {
-  request: RustMethodPolicyOverride;
-  respond: RustMethodPolicyOverride;
-};
-
-type RustManualPeerPolicyOverride = {
-  pubkey: string;
-  policy: RustPeerPolicyOverride;
-};
-
-type RustGroupMember = {
-  idx: number;
-  pubkey: string;
-};
-
-type RustSharePayload = {
-  share_secret: string;
-  relays: string[];
-};
-
-type RustOnboardPayload = RustSharePayload & {
-  peer_pk: string;
-};
-
-type RustProfilePayload = {
-  profile_id: string;
-  version: number;
-  device: {
-    name: string;
-    share_secret: string;
-    manual_peer_policy_overrides: RustManualPeerPolicyOverride[];
-    relays: string[];
-  };
-  group_package: {
-    group_name: string;
-    group_pk: string;
-    threshold: number;
-    members: RustGroupMember[];
-  };
-};
-
-type RustEncryptedProfileBackup = {
-  version: number;
-  device: {
-    name: string;
-    share_public_key: string;
-    manual_peer_policy_overrides: RustManualPeerPolicyOverride[];
-    relays: string[];
-  };
-  group_package: RustProfilePayload['group_package'];
+type BrowserProfilePackagePair = {
+  profileString: string;
+  shareString: string;
 };
 
 function hexToBytes(hex: string) {
@@ -231,218 +171,70 @@ export function groupPackageToWireJson(groupPackage: BrowserGroupPackage) {
   return JSON.stringify(groupPackageToWireValue(groupPackage), null, 2);
 }
 
-function toRustSharePayload(payload: BrowserSharePackagePayload): RustSharePayload {
+export function sharePackageToWireValue(memberIdx: number, shareSecret: string) {
   return {
-    share_secret: payload.shareSecret,
-    relays: payload.relays,
+    idx: memberIdx,
+    seckey: shareSecret,
   };
 }
 
-function fromRustSharePayload(payload: RustSharePayload): BrowserSharePackagePayload {
-  return {
-    shareSecret: payload.share_secret,
-    relays: payload.relays,
-  };
-}
-
-function toRustOnboardPayload(payload: BrowserOnboardPackagePayload): RustOnboardPayload {
-  return {
-    share_secret: payload.shareSecret,
-    relays: payload.relays,
-    peer_pk: payload.peerPubkey,
-  };
-}
-
-function fromRustOnboardPayload(payload: RustOnboardPayload): BrowserOnboardPackagePayload {
-  return {
-    shareSecret: payload.share_secret,
-    relays: payload.relays,
-    peerPubkey: payload.peer_pk,
-  };
-}
-
-function toRustMethodPolicyOverride(policy: BrowserMethodPolicyOverride): RustMethodPolicyOverride {
-  return { ...policy };
-}
-
-function fromRustMethodPolicyOverride(policy: RustMethodPolicyOverride): BrowserMethodPolicyOverride {
-  return { ...policy };
-}
-
-function toRustManualPeerPolicyOverride(
-  policy: BrowserManualPeerPolicyOverride,
-): RustManualPeerPolicyOverride {
-  return {
-    pubkey: policy.pubkey,
-    policy: {
-      request: toRustMethodPolicyOverride(policy.policy.request),
-      respond: toRustMethodPolicyOverride(policy.policy.respond),
-    },
-  };
-}
-
-function fromRustManualPeerPolicyOverride(
-  policy: RustManualPeerPolicyOverride,
-): BrowserManualPeerPolicyOverride {
-  return {
-    pubkey: policy.pubkey,
-    policy: {
-      request: fromRustMethodPolicyOverride(policy.policy.request),
-      respond: fromRustMethodPolicyOverride(policy.policy.respond),
-    },
-  };
-}
-
-function toRustProfilePayload(payload: BrowserProfilePackagePayload): RustProfilePayload {
-  return {
-    profile_id: payload.profileId,
-    version: payload.version,
-    device: {
-      name: payload.device.name,
-      share_secret: payload.device.shareSecret,
-      manual_peer_policy_overrides: payload.device.manualPeerPolicyOverrides.map(toRustManualPeerPolicyOverride),
-      relays: payload.device.relays,
-    },
-    group_package: {
-      group_name: payload.groupPackage.groupName,
-      group_pk: payload.groupPackage.groupPk,
-      threshold: payload.groupPackage.threshold,
-      members: payload.groupPackage.members.map((member) => ({
-        idx: member.idx,
-        pubkey: member.pubkey,
-      })),
-    },
-  };
-}
-
-function fromRustProfilePayload(payload: RustProfilePayload): BrowserProfilePackagePayload {
-  return {
-    profileId: payload.profile_id,
-    version: payload.version,
-    device: {
-      name: payload.device.name,
-      shareSecret: payload.device.share_secret,
-      manualPeerPolicyOverrides: payload.device.manual_peer_policy_overrides.map(
-        fromRustManualPeerPolicyOverride,
-      ),
-      relays: payload.device.relays,
-    },
-    groupPackage: {
-      groupName: payload.group_package.group_name,
-      groupPk: payload.group_package.group_pk,
-      threshold: payload.group_package.threshold,
-      members: payload.group_package.members.map((member) => ({
-        idx: member.idx,
-        pubkey: member.pubkey,
-      })),
-    },
-  };
-}
-
-function fromRustEncryptedProfileBackup(backup: RustEncryptedProfileBackup): BrowserEncryptedProfileBackup {
-  return {
-    version: backup.version,
-    device: {
-      name: backup.device.name,
-      sharePublicKey: backup.device.share_public_key,
-      manualPeerPolicyOverrides: backup.device.manual_peer_policy_overrides.map(
-        fromRustManualPeerPolicyOverride,
-      ),
-      relays: backup.device.relays,
-    },
-    groupPackage: {
-      groupName: backup.group_package.group_name,
-      groupPk: backup.group_package.group_pk,
-      threshold: backup.group_package.threshold,
-      members: backup.group_package.members.map((member) => ({
-        idx: member.idx,
-        pubkey: member.pubkey,
-      })),
-    },
-  };
-}
-
-function toRustEncryptedProfileBackup(backup: BrowserEncryptedProfileBackup): RustEncryptedProfileBackup {
-  return {
-    version: backup.version,
-    device: {
-      name: backup.device.name,
-      share_public_key: backup.device.sharePublicKey,
-      manual_peer_policy_overrides: backup.device.manualPeerPolicyOverrides.map(
-        toRustManualPeerPolicyOverride,
-      ),
-      relays: backup.device.relays,
-    },
-    group_package: {
-      group_name: backup.groupPackage.groupName,
-      group_pk: backup.groupPackage.groupPk,
-      threshold: backup.groupPackage.threshold,
-      members: backup.groupPackage.members.map((member) => ({
-        idx: member.idx,
-        pubkey: member.pubkey,
-      })),
-    },
-  };
+export function sharePackageToWireJson(memberIdx: number, shareSecret: string) {
+  return JSON.stringify(sharePackageToWireValue(memberIdx, shareSecret), null, 2);
 }
 
 export async function createEncryptedProfileBackup(profile: BrowserProfilePackagePayload) {
   const api = await getWasmProfilePackageApi();
-  return fromRustEncryptedProfileBackup(
-    parseJson<RustEncryptedProfileBackup>(
-    api.create_encrypted_profile_backup(JSON.stringify(toRustProfilePayload(profile))),
+  return parseJson<BrowserEncryptedProfileBackup>(
+    api.create_encrypted_profile_backup(JSON.stringify(profile)),
     'encrypted profile backup',
-  ));
+  );
 }
 
 export async function encodeBfSharePackage(payload: BrowserSharePackagePayload, password: string) {
   const api = await getWasmProfilePackageApi();
-  return api.encode_bfshare_package(JSON.stringify(toRustSharePayload(payload)), password);
+  return api.encode_bfshare_package(JSON.stringify(payload), password);
 }
 
 export async function decodeBfSharePackage(packageText: string, password: string) {
   const api = await getWasmProfilePackageApi();
-  return fromRustSharePayload(parseJson<RustSharePayload>(
+  return parseJson<BrowserSharePackagePayload>(
     api.decode_bfshare_package(packageText, password),
     'bfshare payload',
-  ));
+  );
 }
 
 export async function encodeBfOnboardPackage(payload: BrowserOnboardPackagePayload, password: string) {
   const api = await getWasmProfilePackageApi();
-  return api.encode_bfonboard_package(JSON.stringify(toRustOnboardPayload(payload)), password);
+  return api.encode_bfonboard_package(JSON.stringify(payload), password);
 }
 
 export async function decodeBfOnboardPackage(packageText: string, password: string) {
   const api = await getWasmProfilePackageApi();
-  return fromRustOnboardPayload(parseJson<RustOnboardPayload>(
+  return parseJson<BrowserOnboardPackagePayload>(
     api.decode_bfonboard_package(packageText, password),
     'bfonboard payload',
-  ));
+  );
 }
 
 export async function encodeBfProfilePackage(payload: BrowserProfilePackagePayload, password: string) {
   const api = await getWasmProfilePackageApi();
-  return api.encode_bfprofile_package(JSON.stringify(toRustProfilePayload(payload)), password);
+  return api.encode_bfprofile_package(JSON.stringify(payload), password);
 }
 
 export async function decodeBfProfilePackage(packageText: string, password: string) {
   const api = await getWasmProfilePackageApi();
-  return fromRustProfilePayload(parseJson<RustProfilePayload>(
+  return parseJson<BrowserProfilePackagePayload>(
     api.decode_bfprofile_package(packageText, password),
     'bfprofile payload',
-  ));
+  );
 }
 
 export async function createProfilePackagePair(payload: BrowserProfilePackagePayload, password: string) {
   const api = await getWasmProfilePackageApi();
-  const pair = parseJson<RustProfilePackagePair>(
-    api.create_profile_package_pair(JSON.stringify(toRustProfilePayload(payload)), password),
+  return parseJson<BrowserProfilePackagePair>(
+    api.create_profile_package_pair(JSON.stringify(payload), password),
     'profile package pair',
   );
-  return {
-    profileString: pair.profile_string,
-    shareString: pair.share_string,
-  };
 }
 
 export async function deriveProfileBackupConversationKey(shareSecret: string) {
@@ -453,15 +245,15 @@ export async function deriveProfileBackupConversationKey(shareSecret: string) {
 
 export async function encryptProfileBackupContent(backup: BrowserEncryptedProfileBackup, shareSecret: string) {
   const api = await getWasmProfilePackageApi();
-  return api.encrypt_profile_backup_content(JSON.stringify(toRustEncryptedProfileBackup(backup)), shareSecret);
+  return api.encrypt_profile_backup_content(JSON.stringify(backup), shareSecret);
 }
 
 export async function decryptProfileBackupContent(ciphertext: string, shareSecret: string) {
   const api = await getWasmProfilePackageApi();
-  return fromRustEncryptedProfileBackup(parseJson<RustEncryptedProfileBackup>(
+  return parseJson<BrowserEncryptedProfileBackup>(
     api.decrypt_profile_backup_content(ciphertext, shareSecret),
     'encrypted profile backup',
-  ));
+  );
 }
 
 export async function buildProfileBackupEvent(
@@ -471,21 +263,26 @@ export async function buildProfileBackupEvent(
 ) {
   const api = await getWasmProfilePackageApi();
   return parseJson<Event>(
-    api.build_profile_backup_event(
-      shareSecret,
-      JSON.stringify(toRustEncryptedProfileBackup(backup)),
-      createdAt ?? null,
-    ),
+    api.build_profile_backup_event(shareSecret, JSON.stringify(backup), createdAt ?? null),
     'profile backup event',
   );
 }
 
 export async function parseProfileBackupEvent(event: Event, shareSecret: string) {
   const api = await getWasmProfilePackageApi();
-  return fromRustEncryptedProfileBackup(
-    parseJson<RustEncryptedProfileBackup>(
-      api.parse_profile_backup_event(JSON.stringify(event), shareSecret),
-      'encrypted profile backup',
-    ),
+  return parseJson<BrowserEncryptedProfileBackup>(
+    api.parse_profile_backup_event(JSON.stringify(event), shareSecret),
+    'encrypted profile backup',
+  );
+}
+
+export async function recoverProfileFromShareAndBackup(
+  share: BrowserSharePackagePayload,
+  backup: BrowserEncryptedProfileBackup,
+) {
+  const api = await getWasmProfilePackageApi();
+  return parseJson<BrowserProfilePackagePayload>(
+    api.recover_profile_from_share_and_backup(JSON.stringify(share), JSON.stringify(backup)),
+    'recovered profile payload',
   );
 }

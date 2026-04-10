@@ -3,7 +3,7 @@ import { getEventHash, validateEvent, verifyEvent } from 'nostr-tools/pure';
 
 import {
   createWasmBridgeRuntime,
-  getWasmProfilePackageApi,
+  getWasmBridgeOnboardingApi,
   type WasmBridgeRuntimeApi
 } from './bridge-wasm-runtime';
 import { decodeBfOnboardPackage } from './profile-package';
@@ -47,6 +47,8 @@ const PREPARE_OPERATION_TIMEOUT_MS = 10_000;
 const WASM_RUNTIME_INIT_TIMEOUT_MS = 10_000;
 const RELAY_CONNECT_TIMEOUT_MS = 10_000;
 const RECOVERED_PENDING_OPS_REASON = 'pending_operations_recovered';
+const INSUFFICIENT_SIGNING_PEERS_REASON = 'insufficient_signing_peers';
+const INSUFFICIENT_ECDH_PEERS_REASON = 'insufficient_ecdh_peers';
 const logger = createLogger('igloo.runtime');
 
 type RuntimeConfig = {
@@ -55,6 +57,7 @@ type RuntimeConfig = {
   signerSettings?: Partial<SignerSettings>;
   onboardPackage?: string;
   onboardPassword?: string;
+  bootstrapPeerPubkey32Hex?: string;
   runtimeSnapshotJson?: string | null;
   groupPackageJson?: string;
   sharePackageJson?: string;
@@ -91,6 +94,19 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
       setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
     })
   ]);
+}
+
+function canProceedWhileDegraded(kind: 'sign' | 'ecdh', degradedReasons: string[]) {
+  if (degradedReasons.length === 0) {
+    return false;
+  }
+
+  const allowedReasons =
+    kind === 'sign'
+      ? new Set([RECOVERED_PENDING_OPS_REASON, INSUFFICIENT_ECDH_PEERS_REASON])
+      : new Set([RECOVERED_PENDING_OPS_REASON, INSUFFICIENT_SIGNING_PEERS_REASON]);
+
+  return degradedReasons.every((reason) => allowedReasons.has(reason));
 }
 
 export type DecodedOnboardingProfile = {
@@ -309,6 +325,11 @@ type RuntimeBootstrapWire = {
     peer: string;
     nonces: unknown[];
   }>;
+};
+
+type ProfileBootstrapState = {
+  bootstrap: RuntimeBootstrapWire;
+  shareSecret: string;
 };
 
 type OnboardResponseWire = {
@@ -837,17 +858,57 @@ class BrowserBridgeNode implements NodeWithEvents {
         mode: 'persisted'
       });
     } else if (this.config.mode === 'profile') {
-      let bootstrap: RuntimeBootstrapWire;
+      let profileBootstrap: ProfileBootstrapState;
       try {
-        bootstrap = this.buildProfileBootstrap();
+        profileBootstrap = this.buildProfileBootstrap();
       } catch (error) {
         throw withContext('Failed to build profile runtime bootstrap', error);
+      }
+      const bootstrapPeerPubkey =
+        typeof this.config.bootstrapPeerPubkey32Hex === 'string' &&
+        this.config.bootstrapPeerPubkey32Hex.trim().length > 0
+          ? normalizePubkey32Hex(this.config.bootstrapPeerPubkey32Hex, 'bootstrap peer public key')
+          : null;
+      if (bootstrapPeerPubkey) {
+        try {
+          const result = await this.requestOnboardResponse({
+            share_secret: profileBootstrap.shareSecret,
+            share_pubkey32: this.localSharePubkey32,
+            peer_pk_xonly: bootstrapPeerPubkey,
+            relays: this.activeRelays
+          });
+          const bootstrapNonces = Array.isArray(result.response.nonces) ? result.response.nonces : [];
+          if (bootstrapNonces.length > 0) {
+            profileBootstrap.bootstrap.initial_peer_nonces = [
+              {
+                peer: bootstrapPeerPubkey,
+                nonces: bootstrapNonces
+              }
+            ];
+            this.emitLog('info', 'runtime', 'profile_bootstrap_nonces_seeded', {
+              peer_pubkey32: bootstrapPeerPubkey,
+              nonce_count: bootstrapNonces.length
+            });
+          } else {
+            this.emitLog('warn', 'runtime', 'profile_bootstrap_nonces_empty', {
+              peer_pubkey32: bootstrapPeerPubkey
+            });
+          }
+        } catch (error) {
+          this.emitLog('warn', 'runtime', 'profile_bootstrap_nonces_failed', {
+            peer_pubkey32: bootstrapPeerPubkey,
+            error_message: toErrorMessage(error, 'failed to fetch bootstrap nonces')
+          });
+        }
       }
       try {
         this.emitLog('info', 'runtime', 'init_runtime_begin', {
           mode: 'profile'
         });
-        this.runtime.init_runtime(JSON.stringify(runtimeConfig), JSON.stringify(bootstrap));
+        this.runtime.init_runtime(
+          JSON.stringify(runtimeConfig),
+          JSON.stringify(profileBootstrap.bootstrap)
+        );
         this.emitLog('info', 'runtime', 'init_runtime_ok', {
           mode: 'profile'
         });
@@ -875,10 +936,10 @@ class BrowserBridgeNode implements NodeWithEvents {
       const group = onboardResponse.group;
       this.applyGroupState(group);
       const bootstrapPeer = decoded!.peer_pk_xonly.toLowerCase();
-      const profileApi = await getWasmProfilePackageApi();
+      const onboardingApi = await getWasmBridgeOnboardingApi();
       let onboardingSnapshotJson: string;
       try {
-        onboardingSnapshotJson = profileApi.build_onboarding_runtime_snapshot(
+        onboardingSnapshotJson = onboardingApi.build_onboarding_runtime_snapshot(
           JSON.stringify(group),
           decoded!.share_secret,
           bootstrapPeer,
@@ -903,6 +964,20 @@ class BrowserBridgeNode implements NodeWithEvents {
     }
 
     this.subscribeRelayIngress(nowUnixSecs());
+
+    if (this.config.mode !== 'onboarding' && this.peerPubkeys32.size > 0) {
+      try {
+        this.emitLog('info', 'runtime', 'startup_peer_refresh_queued', {
+          peer_count: this.peerPubkeys32.size,
+          peers: Array.from(this.peerPubkeys32),
+        });
+        this.refreshAllPeers();
+      } catch (error) {
+        this.emitLog('warn', 'runtime', 'startup_peer_refresh_failed', {
+          error_message: toErrorMessage(error, 'failed to refresh peers after startup'),
+        });
+      }
+    }
 
     this.tickHandle = setInterval(() => {
       this.pumpRuntime(Date.now());
@@ -1241,12 +1316,8 @@ class BrowserBridgeNode implements NodeWithEvents {
       const ready = kind === 'sign' ? readiness.sign_ready : readiness.ecdh_ready;
       const freshnessSatisfied =
         readiness.last_refresh_at !== null && readiness.last_refresh_at >= startedAtSec;
-      const onlyRecoveredPendingOps =
-        readiness.degraded_reasons.length > 0 &&
-        readiness.degraded_reasons.every(
-          (reason) => reason === RECOVERED_PENDING_OPS_REASON
-        );
-      if ((readiness.restore_complete || onlyRecoveredPendingOps) && ready && freshnessSatisfied) {
+      const degradedButProceedable = canProceedWhileDegraded(kind, readiness.degraded_reasons);
+      if ((readiness.restore_complete || degradedButProceedable) && ready && freshnessSatisfied) {
         this.emitLog('debug', 'runtime', 'prepare_complete', {
           operation: kind,
           proceeded_while_degraded: !readiness.restore_complete,
@@ -1273,8 +1344,8 @@ class BrowserBridgeNode implements NodeWithEvents {
 
     const reason =
       kind === 'sign'
-        ? 'insufficient_signing_peers'
-        : 'insufficient_ecdh_peers';
+        ? INSUFFICIENT_SIGNING_PEERS_REASON
+        : INSUFFICIENT_ECDH_PEERS_REASON;
     throw new Error(
       `${reason}: ${JSON.stringify(
         lastReadiness ?? {
@@ -1393,7 +1464,7 @@ class BrowserBridgeNode implements NodeWithEvents {
     }
   }
 
-  private buildProfileBootstrap(): RuntimeBootstrapWire {
+  private buildProfileBootstrap(): ProfileBootstrapState {
     if (typeof this.config.groupPackageJson !== 'string' || !this.config.groupPackageJson.trim()) {
       throw new Error('Missing group package for profile runtime bootstrap');
     }
@@ -1424,13 +1495,16 @@ class BrowserBridgeNode implements NodeWithEvents {
     );
 
     return {
-      group,
-      share: {
-        idx: typeof share.idx === 'number' ? Math.trunc(share.idx) : 0,
-        seckey: shareSecret,
-      },
-      peers: this.applyGroupState(group),
-      initial_peer_nonces: [],
+      shareSecret,
+      bootstrap: {
+        group,
+        share: {
+          idx: typeof share.idx === 'number' ? Math.trunc(share.idx) : 0,
+          seckey: shareSecret,
+        },
+        peers: this.applyGroupState(group),
+        initial_peer_nonces: [],
+      }
     };
   }
 
@@ -1441,9 +1515,9 @@ class BrowserBridgeNode implements NodeWithEvents {
 
     const now = nowUnixSecs();
     const shareSecret = hexToBytes(decoded.share_secret);
-    const profileApi = await getWasmProfilePackageApi();
+    const onboardingApi = await getWasmBridgeOnboardingApi();
     const bundle = parseOnboardingRequestBundle(
-      profileApi.create_onboarding_request_bundle(
+      onboardingApi.create_onboarding_request_bundle(
         decoded.share_secret,
         decoded.peer_pk_xonly.toLowerCase(),
         BIFROST_EVENT_KIND,

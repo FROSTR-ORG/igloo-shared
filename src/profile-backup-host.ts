@@ -1,4 +1,4 @@
-import { SimplePool, getPublicKey, type Event, type Filter } from 'nostr-tools';
+import { SimplePool, type Event, type Filter } from 'nostr-tools';
 
 import {
   type BrowserEncryptedProfileBackup,
@@ -6,10 +6,11 @@ import {
   type BrowserSharePackagePayload,
   buildProfileBackupEvent,
   decodeBfSharePackage,
-  deriveProfileIdFromShareSecret,
   getProfileBackupEventKind,
   parseProfileBackupEvent,
+  recoverProfileFromShareAndBackup,
 } from './profile-package';
+import { normalizeHex32, publicKeyFromSecret } from './browser-profile';
 
 export type BrowserShareRecoveryResult = {
   share: BrowserSharePackagePayload;
@@ -18,35 +19,12 @@ export type BrowserShareRecoveryResult = {
   event: Event;
 };
 
-const HEX_32_REGEX = /^[0-9a-f]{64}$/;
-
-function normalizeHex32(value: string, label: string) {
-  const normalized = value.trim().toLowerCase();
-  if (!HEX_32_REGEX.test(normalized)) {
-    throw new Error(`Invalid ${label}.`);
-  }
-  return normalized;
-}
-
 function normalizeRelays(relays: string[]) {
   const normalized = relays.map((relay) => relay.trim()).filter(Boolean);
   if (!normalized.length) {
     throw new Error('At least one relay is required.');
   }
   return normalized;
-}
-
-function hexToBytes(hex: string) {
-  const normalized = normalizeHex32(hex, 'share secret');
-  const bytes = new Uint8Array(normalized.length / 2);
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16);
-  }
-  return bytes;
-}
-
-function publicKeyFromSecret(shareSecret: string) {
-  return getPublicKey(hexToBytes(shareSecret)).toLowerCase();
 }
 
 function closePool(pool: SimplePool, relays: string[]) {
@@ -133,17 +111,10 @@ export async function recoverProfileFromSharePackage(
     shareSecret: share.shareSecret,
     maxWait: options?.maxWait,
   });
-  const profile: BrowserProfilePackagePayload = {
-    profileId: await deriveProfileIdFromShareSecret(share.shareSecret),
-    version: backup.version,
-    device: {
-      name: backup.device.name,
-      shareSecret: share.shareSecret,
-      manualPeerPolicyOverrides: backup.device.manualPeerPolicyOverrides,
-      relays: backup.device.relays,
-    },
-    groupPackage: backup.groupPackage,
-  };
+  const profile: BrowserProfilePackagePayload = await recoverProfileFromShareAndBackup(
+    share,
+    backup,
+  );
   return {
     share,
     backup,
