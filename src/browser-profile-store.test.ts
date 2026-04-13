@@ -204,7 +204,8 @@ describe('browser-profile-store helpers', () => {
       }),
     ).toThrow(/Invalid group package JSON/);
 
-    const event = JSON.parse(String(errorSpy.mock.calls.at(-1)?.[0] ?? '{}'));
+    const lastErrorCall = errorSpy.mock.calls[errorSpy.mock.calls.length - 1];
+    const event = JSON.parse(String(lastErrorCall?.[0] ?? '{}'));
     expect(event).toEqual(
       expect.objectContaining({
         domain: 'profile',

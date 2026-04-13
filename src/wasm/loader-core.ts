@@ -1,6 +1,6 @@
 import type { WasmLoaderConfig, WasmLoaderInitModule } from './types';
 
-export const BROWSER_WASM_BUILD_COMMAND = 'npm run build:browser-wasm';
+export const BROWSER_WASM_BUILD_COMMAND = 'make browser-wasm-sync';
 
 export async function dynamicImportModule(url: string) {
   return await import(/* @vite-ignore */ url);

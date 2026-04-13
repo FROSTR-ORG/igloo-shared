@@ -114,7 +114,8 @@ describe('browser-profile-save helpers', () => {
         detail: 'runtime offline',
       }),
     );
-    const event = JSON.parse(String(warnSpy.mock.calls.at(-1)?.[0] ?? '{}'));
+    const lastWarnCall = warnSpy.mock.calls[warnSpy.mock.calls.length - 1];
+    const event = JSON.parse(String(lastWarnCall?.[0] ?? '{}'));
     expect(event).toEqual(
       expect.objectContaining({
         domain: 'profile',
@@ -195,7 +196,8 @@ describe('browser-profile-save helpers', () => {
       }),
     ).rejects.toThrow(/bad package/);
 
-    const event = JSON.parse(String(errorSpy.mock.calls.at(-1)?.[0] ?? '{}'));
+    const lastErrorCall = errorSpy.mock.calls[errorSpy.mock.calls.length - 1];
+    const event = JSON.parse(String(lastErrorCall?.[0] ?? '{}'));
     expect(event).toEqual(
       expect.objectContaining({
         domain: 'profile',
@@ -222,7 +224,8 @@ describe('browser-profile-save helpers', () => {
       }),
     ).rejects.toThrow(/persist exploded/);
 
-    const event = JSON.parse(String(errorSpy.mock.calls.at(-1)?.[0] ?? '{}'));
+    const lastErrorCall = errorSpy.mock.calls[errorSpy.mock.calls.length - 1];
+    const event = JSON.parse(String(lastErrorCall?.[0] ?? '{}'));
     expect(event).toEqual(
       expect.objectContaining({
         domain: 'profile',
