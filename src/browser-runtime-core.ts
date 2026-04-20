@@ -229,12 +229,20 @@ export type RuntimePendingOperation = {
   context: unknown;
 };
 
+export type RuntimeOnboardingStatus = {
+  pubkey: string;
+  stage: 'device_contacted_host' | 'handshake_completed' | 'failed';
+  updated_at: number;
+  error?: string | null;
+};
+
 export type RuntimeStatusSummary = {
   status: RuntimeStatusDetails;
   metadata: RuntimeMetadata;
   readiness: RuntimeReadiness;
   peers: RuntimePeerStatus[];
   peer_permission_states: RuntimePeerPermissionState[];
+  onboarding_statuses?: RuntimeOnboardingStatus[];
   pending_operations: RuntimePendingOperation[];
 };
 
