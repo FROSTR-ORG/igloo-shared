@@ -1,4 +1,7 @@
 export * from './bridge-wasm-runtime';
+export * from './errors';
+export * from './secret';
+export * from './observability-schema';
 export * from './browser-onboarding';
 export * from './browser-profile';
 export * from './browser-profile-persistence';

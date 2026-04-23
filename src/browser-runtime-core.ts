@@ -8,6 +8,7 @@ import {
 } from './bridge-wasm-runtime';
 import { decodeBfOnboardPackage } from './profile-package';
 import { createLogger } from './observability';
+import { RuntimeReadinessTimeoutError } from './errors';
 import {
   normalizeNip44PayloadForJs,
   normalizeNip44PayloadForRust
@@ -1380,19 +1381,18 @@ class BrowserBridgeNode implements NodeWithEvents {
       this.pumpRuntime(Date.now());
     }
 
-    const reason =
-      kind === 'sign'
-        ? INSUFFICIENT_SIGNING_PEERS_REASON
-        : INSUFFICIENT_ECDH_PEERS_REASON;
-    throw new Error(
-      `${reason}: ${JSON.stringify(
-        lastReadiness ?? {
-          runtime_ready: false,
-          restore_complete: false,
-          sign_ready: false,
-          ecdh_ready: false
-        }
-      )}`
+    const threshold = lastReadiness?.threshold ?? 0;
+    const signingPeerCount = lastReadiness?.signing_peer_count ?? 0;
+    const ecdhPeerCount = lastReadiness?.ecdh_peer_count ?? 0;
+    const degradedReasonCount = Array.isArray(lastReadiness?.degraded_reasons)
+      ? lastReadiness.degraded_reasons.length
+      : 0;
+    throw new RuntimeReadinessTimeoutError(
+      kind,
+      threshold,
+      signingPeerCount,
+      ecdhPeerCount,
+      degradedReasonCount,
     );
   }
 
