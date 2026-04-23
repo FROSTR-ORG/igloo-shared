@@ -41,6 +41,7 @@ export type EventSchema = {
  */
 export const EVENT_SCHEMAS: EventSchema = {
   runtime: {
+    detach_listener_failed: ['event_name', 'error_message'],
     wasm_runtime_init_begin: ['mode'],
     wasm_runtime_init_ok: ['mode'],
     connect_begin: ['mode', 'relay_count', 'relays'],
@@ -136,6 +137,22 @@ export const EVENT_SCHEMAS: EventSchema = {
   },
   wasm: {
     loader_init: ['source'],
+  },
+  ui: {
+    refresh_peers_failed: ['error_message'],
+  },
+  profile: {
+    activate_runtime_unavailable: [
+      'stage',
+      'warning_code',
+      'warning_message',
+      'warning_detail',
+    ],
+    activate_failed: ['stage', 'error_message'],
+    persist_failed: ['flow_kind', 'stage', 'profile_id', 'error_message'],
+    decode_failed: ['flow_kind', 'stage', 'profile_id', 'error_message'],
+    finalize_failed: ['flow_kind', 'stage', 'profile_id', 'error_message'],
+    reconstruct_failed: ['flow_kind', 'stage', 'profile_id', 'error_message'],
   },
 };
 

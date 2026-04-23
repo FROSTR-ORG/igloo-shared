@@ -569,6 +569,36 @@ function parseOperationFailure(
   return { opType: failure.op_type, message: failure.message };
 }
 
+/**
+ * Extract the kind tag from a completion payload without pulling any
+ * structured (secret-bearing) sub-fields. Returns `'ping' | 'sign' | 'ecdh'`
+ * when the payload matches a known shape; `'unknown'` otherwise.
+ */
+function completionKind(completion: unknown): string {
+  if (!isRecord(completion)) return 'unknown';
+  if (isRecord(completion.Ping)) return 'ping';
+  if (isRecord(completion.Sign)) return 'sign';
+  if (isRecord(completion.Ecdh)) return 'ecdh';
+  return 'unknown';
+}
+
+/** Extract `request_id` from a completion payload, or return `undefined`. */
+function completionRequestId(completion: unknown): string | undefined {
+  if (!isRecord(completion)) return undefined;
+  for (const payload of [completion.Ping, completion.Sign, completion.Ecdh]) {
+    if (isRecord(payload) && typeof payload.request_id === 'string') {
+      return payload.request_id;
+    }
+  }
+  return undefined;
+}
+
+/** Extract `request_id` from a failure payload, or return `undefined`. */
+function failureRequestId(failure: unknown): string | undefined {
+  if (!isRecord(failure)) return undefined;
+  return typeof failure.request_id === 'string' ? failure.request_id : undefined;
+}
+
 function clearPendingCommand(pending: PendingBridgeCommand | null) {
   if (!pending) return;
   clearTimeout(pending.timeoutHandle);
@@ -1746,7 +1776,10 @@ class BrowserBridgeNode implements NodeWithEvents {
       const completions = JSON.parse(completionsRaw) as unknown;
       if (Array.isArray(completions)) {
         for (const completion of completions) {
-          this.emitLog('debug', 'runtime', 'completion', { completion });
+          this.emitLog('debug', 'runtime', 'completion', {
+            kind: completionKind(completion),
+            request_id: completionRequestId(completion),
+          });
 
           const ping = parsePingCompletion(completion);
           if (ping) {
@@ -1786,26 +1819,31 @@ class BrowserBridgeNode implements NodeWithEvents {
       if (Array.isArray(failures)) {
         for (const failure of failures) {
           const parsedFailure = parseOperationFailure(failure);
+          const failureDetails = {
+            op_type: parsedFailure?.opType,
+            message: parsedFailure?.message,
+            request_id: failureRequestId(failure),
+          };
           if (parsedFailure?.opType === 'ping') {
             const pending = this.pendingPings.shift();
             const error = parsedFailure.message || 'Ping round failed';
             if (pending) {
               if (pending.quiet) {
-                this.emitLog('debug', 'runtime', 'failure', { failure });
+                this.emitLog('debug', 'runtime', 'failure', failureDetails);
               } else {
-                this.emitLog('info', 'runtime', 'failure', { failure });
+                this.emitLog('info', 'runtime', 'failure', failureDetails);
               }
               pending.resolve({
                 success: false,
                 error
               });
             } else {
-              this.emitLog('debug', 'runtime', 'failure', { failure });
+              this.emitLog('debug', 'runtime', 'failure', failureDetails);
             }
             continue;
           }
 
-          this.emitLog('warn', 'runtime', 'failure', { failure });
+          this.emitLog('warn', 'runtime', 'failure', failureDetails);
 
           if (
             parsedFailure &&
