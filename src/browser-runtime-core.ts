@@ -403,14 +403,102 @@ type PendingPing = {
   resolve: (value: PingResult) => void;
 };
 
-type PendingBridgeCommandKind = 'sign' | 'ecdh';
+/** @internal */
+export type PendingBridgeCommandKind = 'sign' | 'ecdh';
 
-type PendingBridgeCommand = {
+/**
+ * Pending bridge command entry. Dispatch is keyed by `requestId` — the
+ * identifier used to correlate the command with its completion. `kind` is
+ * retained for observability only; it is NOT used for correlation.
+ *
+ * `status` tracks whether a timeout has already consumed the promise. A
+ * timed-out entry is kept in the per-kind FIFO as a tombstone so that a
+ * late-arriving completion matches against it (and is surfaced as a stale
+ * completion observability event) instead of silently binding to a newer
+ * in-flight command of the same kind.
+ *
+ * @internal
+ */
+export type PendingBridgeCommand = {
+  requestId: string;
   kind: PendingBridgeCommandKind;
   resolve: (value: string) => void;
   reject: (error: Error) => void;
   timeoutHandle: ReturnType<typeof setTimeout>;
+  status: 'pending' | 'timed_out';
 };
+
+/**
+ * Mutable state shared between `runBridgeCommand`, the runtime-pump
+ * dispatcher, and shutdown. Split out as a struct so the correlation logic
+ * can be unit-tested without instantiating the full WASM-backed node.
+ *
+ * @internal
+ */
+export type PendingBridgeCommandState = {
+  commands: Map<string, PendingBridgeCommand>;
+  kindFifo: Record<PendingBridgeCommandKind, string[]>;
+};
+
+/** @internal */
+export function createPendingBridgeCommandState(): PendingBridgeCommandState {
+  return {
+    commands: new Map(),
+    kindFifo: { sign: [], ecdh: [] },
+  };
+}
+
+/**
+ * Outcome of dispatching a completion against the pending-command state.
+ * Exposed so tests can observe dispatch decisions without touching the
+ * resolve/reject plumbing.
+ *
+ * @internal
+ */
+export type BridgeDispatchOutcome =
+  | { kind: 'resolved'; entry: PendingBridgeCommand }
+  | { kind: 'stale'; requestId: string; op: PendingBridgeCommandKind };
+
+/**
+ * Match a completion's `(kind, request_id)` against the pending-command
+ * state. Removes the matched entry (whether consumed or stale) and returns
+ * a description of what happened.
+ *
+ * @internal
+ */
+export function matchBridgeCompletion(
+  state: PendingBridgeCommandState,
+  kind: PendingBridgeCommandKind,
+  completionRequestId: string,
+): BridgeDispatchOutcome {
+  const direct = state.commands.get(completionRequestId);
+  if (direct && direct.kind === kind) {
+    state.commands.delete(completionRequestId);
+    const fifo = state.kindFifo[kind];
+    const idx = fifo.indexOf(completionRequestId);
+    if (idx >= 0) fifo.splice(idx, 1);
+    if (direct.status === 'pending') {
+      return { kind: 'resolved', entry: direct };
+    }
+    return { kind: 'stale', requestId: completionRequestId, op: kind };
+  }
+
+  const fifo = state.kindFifo[kind];
+  const oldestKey = fifo.shift();
+  if (oldestKey === undefined) {
+    return { kind: 'stale', requestId: completionRequestId, op: kind };
+  }
+  const entry = state.commands.get(oldestKey);
+  state.commands.delete(oldestKey);
+  if (!entry) {
+    return { kind: 'stale', requestId: completionRequestId, op: kind };
+  }
+  if (entry.status === 'timed_out') {
+    return { kind: 'stale', requestId: completionRequestId, op: kind };
+  }
+  entry.requestId = completionRequestId;
+  return { kind: 'resolved', entry };
+}
 
 const ensureArray = (value: string[]) =>
   Array.from(new Set(value.map((relay) => relay.replace(/\/$/, ''))));
@@ -545,21 +633,32 @@ function parsePingCompletion(completion: unknown): { requestId: string; peer: st
   return { requestId, peer };
 }
 
-function parseSignCompletion(completion: unknown): { signatures: string[] } | null {
+function parseSignCompletion(
+  completion: unknown
+): { requestId: string; signatures: string[] } | null {
   if (!isRecord(completion)) return null;
   const payload = completion.Sign;
   if (!isRecord(payload) || !Array.isArray(payload.signatures_hex64)) return null;
+  if (typeof payload.request_id !== 'string') return null;
   const signatures = payload.signatures_hex64.filter(
     (value): value is string => typeof value === 'string'
   );
-  return signatures.length > 0 ? { signatures } : null;
+  return signatures.length > 0
+    ? { requestId: payload.request_id, signatures }
+    : null;
 }
 
-function parseEcdhCompletion(completion: unknown): { sharedSecretHex32: string } | null {
+function parseEcdhCompletion(
+  completion: unknown
+): { requestId: string; sharedSecretHex32: string } | null {
   if (!isRecord(completion)) return null;
   const payload = completion.Ecdh;
   if (!isRecord(payload) || typeof payload.shared_secret_hex32 !== 'string') return null;
-  return { sharedSecretHex32: payload.shared_secret_hex32.toLowerCase() };
+  if (typeof payload.request_id !== 'string') return null;
+  return {
+    requestId: payload.request_id,
+    sharedSecretHex32: payload.shared_secret_hex32.toLowerCase(),
+  };
 }
 
 function parseOperationFailure(
@@ -600,7 +699,7 @@ function failureRequestId(failure: unknown): string | undefined {
   return typeof failure.request_id === 'string' ? failure.request_id : undefined;
 }
 
-function clearPendingCommand(pending: PendingBridgeCommand | null) {
+function clearPendingCommand(pending: PendingBridgeCommand | null | undefined) {
   if (!pending) return;
   clearTimeout(pending.timeoutHandle);
 }
@@ -648,7 +747,20 @@ class BrowserBridgeNode implements NodeWithEvents {
   private peerPubkeys32 = new Set<string>();
   private xonlyToPeer32 = new Map<string, string>();
   private pendingPings: PendingPing[] = [];
-  private pendingCommand: PendingBridgeCommand | null = null;
+  /**
+   * Outstanding bridge commands keyed by `requestId`. A map (not a single
+   * slot) so that completion dispatch is id-correlated rather than matched
+   * by operation kind — which previously allowed a stale completion for a
+   * timed-out operation to bind to the next command of the same kind.
+   *
+   * Entries initially use a TS-generated client id (since the WASM
+   * `handle_command` entry point does not accept nor return the
+   * bifrost-rs-generated `request_id`). The entry is re-keyed to the
+   * bifrost-rs id the first time a matching completion arrives, via the
+   * per-kind FIFO carried inside `pendingCommandState`.
+   */
+  private pendingCommandState: PendingBridgeCommandState =
+    createPendingBridgeCommandState();
   private commandChain: Promise<void> = Promise.resolve();
   private lastRuntimeStatus: RuntimeStatusSummary | null = null;
   private readonly nodeLogger = logger;
@@ -1057,11 +1169,15 @@ class BrowserBridgeNode implements NodeWithEvents {
       pending?.resolve({ success: false, error: 'Signer stopped' });
     }
 
-    if (this.pendingCommand) {
-      const pending = this.pendingCommand;
-      this.pendingCommand = null;
-      clearPendingCommand(pending);
-      pending.reject(new Error('Signer stopped'));
+    if (this.pendingCommandState.commands.size > 0) {
+      const entries = Array.from(this.pendingCommandState.commands.values());
+      this.pendingCommandState = createPendingBridgeCommandState();
+      for (const pending of entries) {
+        clearPendingCommand(pending);
+        if (pending.status === 'pending') {
+          pending.reject(new Error('Signer stopped'));
+        }
+      }
     }
 
     this.emit('closed');
@@ -1796,19 +1912,17 @@ class BrowserBridgeNode implements NodeWithEvents {
           }
 
           const sign = parseSignCompletion(completion);
-          if (sign && this.pendingCommand?.kind === 'sign') {
-            const pending = this.pendingCommand;
-            this.pendingCommand = null;
-            clearPendingCommand(pending);
-            pending.resolve(sign.signatures[0]);
+          if (sign) {
+            this.dispatchBridgeCompletion('sign', sign.requestId, (pending) => {
+              pending.resolve(sign.signatures[0]);
+            });
           }
 
           const ecdh = parseEcdhCompletion(completion);
-          if (ecdh && this.pendingCommand?.kind === 'ecdh') {
-            const pending = this.pendingCommand;
-            this.pendingCommand = null;
-            clearPendingCommand(pending);
-            pending.resolve(ecdh.sharedSecretHex32);
+          if (ecdh) {
+            this.dispatchBridgeCompletion('ecdh', ecdh.requestId, (pending) => {
+              pending.resolve(ecdh.sharedSecretHex32);
+            });
           }
 
         }
@@ -1847,13 +1961,16 @@ class BrowserBridgeNode implements NodeWithEvents {
 
           if (
             parsedFailure &&
-            this.pendingCommand &&
-            parsedFailure.opType === this.pendingCommand.kind
+            (parsedFailure.opType === 'sign' || parsedFailure.opType === 'ecdh')
           ) {
-            const pending = this.pendingCommand;
-            this.pendingCommand = null;
-            clearPendingCommand(pending);
-            pending.reject(new Error(parsedFailure.message));
+            const failureId = failureRequestId(failure);
+            if (typeof failureId === 'string' && failureId.length > 0) {
+              this.dispatchBridgeCompletion(
+                parsedFailure.opType,
+                failureId,
+                (pending) => pending.reject(new Error(parsedFailure.message)),
+              );
+            }
           }
 
         }
@@ -1875,6 +1992,34 @@ class BrowserBridgeNode implements NodeWithEvents {
     return next;
   }
 
+  /**
+   * Associate a completion (identified by bifrost-rs `request_id`) with its
+   * pending command entry and invoke `onMatch`. If no matching entry exists
+   * (or the matched entry was already consumed by a timeout), emits a
+   * `runtime.stale_completion` observability event and returns without
+   * resolving any promise.
+   */
+  private dispatchBridgeCompletion(
+    kind: PendingBridgeCommandKind,
+    completionRequestId: string,
+    onMatch: (pending: PendingBridgeCommand) => void,
+  ): void {
+    const outcome = matchBridgeCompletion(
+      this.pendingCommandState,
+      kind,
+      completionRequestId,
+    );
+    if (outcome.kind === 'resolved') {
+      clearPendingCommand(outcome.entry);
+      onMatch(outcome.entry);
+      return;
+    }
+    this.emitLog('warn', 'runtime', 'stale_completion', {
+      request_id: outcome.requestId,
+      kind: outcome.op,
+    });
+  }
+
   private async runBridgeCommand(
     kind: PendingBridgeCommandKind,
     command: Record<string, unknown>
@@ -1886,31 +2031,58 @@ class BrowserBridgeNode implements NodeWithEvents {
     return await this.enqueueCommand(
       () =>
         new Promise<string>((resolve, reject) => {
+          // Generate a TS-side correlation id. The bifrost-rs WASM bridge
+          // presently generates its own `request_id` inside the signer and
+          // emits it back on the completion; we store the pending entry under
+          // a client-generated UUID and re-key on first matching completion
+          // (see `dispatchBridgeCompletion`). Using a UUID guarantees no
+          // collision with a bifrost-rs-generated id.
+          const requestId = crypto.randomUUID();
           this.emitLog('debug', 'bridge', 'command_start', {
             command_kind: kind
           });
           const timeoutHandle = setTimeout(() => {
-            if (!this.pendingCommand || this.pendingCommand.kind !== kind) return;
-            this.pendingCommand = null;
+            const entry = this.pendingCommandState.commands.get(requestId);
+            if (!entry || entry.status !== 'pending') return;
+            // Leave the entry in the FIFO as a tombstone so a late
+            // completion for this command consumes it (and is logged as a
+            // stale completion) instead of binding to a fresher command of
+            // the same kind.
+            entry.status = 'timed_out';
             this.emitLog('warn', 'bridge', 'command_timeout', {
               command_kind: kind
             });
             reject(new Error(`${kind} command timed out`));
           }, BRIDGE_COMMAND_TIMEOUT_MS);
 
-          this.pendingCommand = {
+          this.pendingCommandState.commands.set(requestId, {
+            requestId,
             kind,
             resolve,
             reject,
-            timeoutHandle
-          };
+            timeoutHandle,
+            status: 'pending',
+          });
+          this.pendingCommandState.kindFifo[kind].push(requestId);
 
           try {
-            this.runtime?.handle_command(JSON.stringify(command));
+            // NOTE: `request_id` is included in the outgoing payload for
+            // forward-compatibility. The current WASM bridge ignores extra
+            // fields and generates its own id; the completion's id is what
+            // dispatches this entry. A future bridge change that echoes this
+            // id will make dispatch a fast-path map lookup.
+            this.runtime?.handle_command(
+              JSON.stringify({ ...command, request_id: requestId })
+            );
             this.pumpRuntime(Date.now());
           } catch (error) {
-            const pending = this.pendingCommand;
-            this.pendingCommand = null;
+            const pending = this.pendingCommandState.commands.get(requestId);
+            this.pendingCommandState.commands.delete(requestId);
+            const fifoIndex =
+              this.pendingCommandState.kindFifo[kind].indexOf(requestId);
+            if (fifoIndex >= 0) {
+              this.pendingCommandState.kindFifo[kind].splice(fifoIndex, 1);
+            }
             clearPendingCommand(pending);
             this.emitLog('error', 'bridge', 'command_failed', {
               command_kind: kind,
