@@ -557,6 +557,87 @@ export function recordOnboardingDecryptAttempt(
   return 'allow';
 }
 
+/**
+ * Outcome of validating a decrypted onboarding group descriptor.
+ *
+ * The TS/Rust split in the onboarding pathway is:
+ *   - TS (this function) owns input validation: structural shape, member
+ *     uniqueness, threshold bounds, presence of the local share pubkey in
+ *     the member set. These checks cannot depend on secret material.
+ *   - bifrost-rs (`build_onboarding_runtime_snapshot`) owns cryptographic
+ *     validation: signatures, threshold-signature correctness, share
+ *     validity.
+ * Both sides must pass. A failing TS-side check drops the event and
+ * surfaces a scalar observability signal; the payload never reaches WASM.
+ *
+ * @internal
+ */
+export type OnboardingGroupValidation =
+  | { kind: 'ok'; memberCount: number; threshold: number }
+  | { kind: 'malformed' }
+  | { kind: 'peer_not_in_group' }
+  | { kind: 'duplicate_members' }
+  | { kind: 'bad_threshold' };
+
+/**
+ * Validate the `group` subobject of a decrypted OnboardResponse envelope
+ * before handing it to the runtime. See `OnboardingGroupValidation` for
+ * the per-outcome semantics.
+ *
+ * `sharePubkey32` is the caller's share x-only pubkey in lowercase hex.
+ * Member pubkeys may be 32-byte (x-only, 64 hex chars) or 33-byte
+ * (compressed, 66 hex chars with `02`/`03` prefix); both encodings are
+ * accepted and the membership test matches on the trailing 32-byte
+ * component.
+ *
+ * @internal
+ */
+export function validateOnboardingGroup(
+  group: unknown,
+  sharePubkey32: string,
+): OnboardingGroupValidation {
+  if (!isRecord(group)) return { kind: 'malformed' };
+  const members = group.members;
+  if (!Array.isArray(members) || members.length < 1) {
+    return { kind: 'malformed' };
+  }
+
+  const memberPubkeys: string[] = [];
+  for (const entry of members) {
+    if (!isRecord(entry) || typeof entry.pubkey !== 'string') {
+      return { kind: 'malformed' };
+    }
+    memberPubkeys.push(entry.pubkey.toLowerCase());
+  }
+
+  const sharePubkeyLower = sharePubkey32.toLowerCase();
+  if (!memberPubkeys.some((pk) => pk.endsWith(sharePubkeyLower))) {
+    return { kind: 'peer_not_in_group' };
+  }
+
+  const uniqueMembers = new Set(memberPubkeys);
+  if (uniqueMembers.size !== memberPubkeys.length) {
+    return { kind: 'duplicate_members' };
+  }
+
+  const threshold = group.threshold;
+  if (
+    typeof threshold !== 'number' ||
+    !Number.isFinite(threshold) ||
+    !Number.isInteger(threshold) ||
+    threshold < 1 ||
+    threshold > memberPubkeys.length
+  ) {
+    return { kind: 'bad_threshold' };
+  }
+
+  return {
+    kind: 'ok',
+    memberCount: memberPubkeys.length,
+    threshold,
+  };
+}
+
 const ensureArray = (value: string[]) =>
   Array.from(new Set(value.map((relay) => relay.replace(/\/$/, ''))));
 
@@ -1819,6 +1900,33 @@ class BrowserBridgeNode implements NodeWithEvents {
             if (envelope.payload.type !== 'OnboardResponse') return;
             if (!isRecord(envelope.payload.data)) return;
             if (!isRecord(envelope.payload.data.group)) return;
+
+            // Defense-in-depth: validate the decrypted group descriptor
+            // before handing it to the runtime. See `validateOnboardingGroup`
+            // for the TS/Rust validation split.
+            const validation = validateOnboardingGroup(
+              envelope.payload.data.group,
+              bundle.local_pubkey32,
+            );
+            if (validation.kind === 'malformed') return;
+            if (validation.kind === 'peer_not_in_group') {
+              this.emitLog('warn', 'onboarding', 'peer_not_in_group', {
+                request_id: requestId,
+              });
+              return;
+            }
+            if (validation.kind === 'duplicate_members') {
+              this.emitLog('warn', 'onboarding', 'duplicate_members', {
+                request_id: requestId,
+              });
+              return;
+            }
+            if (validation.kind === 'bad_threshold') {
+              this.emitLog('warn', 'onboarding', 'bad_threshold', {
+                request_id: requestId,
+              });
+              return;
+            }
 
             finish(() => {
               clearTimeout(timer);
