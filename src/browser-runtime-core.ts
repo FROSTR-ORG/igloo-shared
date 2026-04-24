@@ -42,6 +42,17 @@ const BIFROST_EVENT_KIND = Number.isFinite(BIFROST_EVENT_KIND_RAW)
   ? BIFROST_EVENT_KIND_RAW
   : 20000;
 const ONBOARD_TIMEOUT_MS = 10_000;
+/**
+ * Maximum number of decrypt attempts allowed per onboarding request window.
+ *
+ * An adversarial relay could otherwise flood the onevent handler with
+ * malformed envelopes. Rejecting after a fixed budget bounds worst-case
+ * CPU use and makes the abuse observable via `decrypt_cap_reached`. The
+ * counter is scoped to the requestId; a fresh onboarding request starts
+ * fresh. The 30s window matches the onboarding timeout; once the outer
+ * subscription closes, further events are ignored regardless.
+ */
+export const MAX_ONBOARDING_DECRYPTS = 50;
 const PING_TIMEOUT_MS = 10_000;
 const BRIDGE_COMMAND_TIMEOUT_MS = 10_000;
 const PREPARE_OPERATION_TIMEOUT_MS = 10_000;
@@ -498,6 +509,52 @@ export function matchBridgeCompletion(
   }
   entry.requestId = completionRequestId;
   return { kind: 'resolved', entry };
+}
+
+/**
+ * Per-request decrypt budget tracker for the onboarding subscription.
+ *
+ * Scoped to a single onboarding request (by `requestId`) rather than
+ * globally so a legitimate operator retry is not penalized by a prior
+ * adversarial burst. Once the counter hits the cap, further decrypt
+ * attempts are refused; the first refusal trips the `capWarned` flag so
+ * a single `decrypt_cap_reached` observability event is emitted per
+ * request window rather than once per dropped event.
+ *
+ * @internal
+ */
+export type OnboardingDecryptCounter = {
+  attempts: number;
+  capWarned: boolean;
+};
+
+/** @internal */
+export function createOnboardingDecryptCounter(): OnboardingDecryptCounter {
+  return { attempts: 0, capWarned: false };
+}
+
+/**
+ * Advance the decrypt budget. Returns `'cap_reached_first'` exactly once
+ * per onboarding window (when the cap is first crossed), `'cap_reached'`
+ * for subsequent refusals, and `'allow'` while budget remains. Callers
+ * emit the `decrypt_cap_reached` event only on the `'cap_reached_first'`
+ * outcome.
+ *
+ * @internal
+ */
+export function recordOnboardingDecryptAttempt(
+  counter: OnboardingDecryptCounter,
+  maxAttempts: number = MAX_ONBOARDING_DECRYPTS,
+): 'allow' | 'cap_reached_first' | 'cap_reached' {
+  if (counter.attempts >= maxAttempts) {
+    if (!counter.capWarned) {
+      counter.capWarned = true;
+      return 'cap_reached_first';
+    }
+    return 'cap_reached';
+  }
+  counter.attempts += 1;
+  return 'allow';
 }
 
 const ensureArray = (value: string[]) =>
@@ -1704,6 +1761,10 @@ class BrowserBridgeNode implements NodeWithEvents {
     return await new Promise<OnboardingRequestResult>((resolve, reject) => {
       let settled = false;
       const closeReasons: string[][] = [];
+      // Per-request decrypt budget. Reset on every new onboarding request
+      // rather than globally, so a legitimate retry by the operator is not
+      // penalized by a prior adversarial burst.
+      const decryptCounter = createOnboardingDecryptCounter();
       const finish = (fn: () => void) => {
         if (settled) return;
         settled = true;
@@ -1738,6 +1799,15 @@ class BrowserBridgeNode implements NodeWithEvents {
               .filter(([name]) => name === 'p')
               .map(([, value]) => value)
           });
+          const budget = recordOnboardingDecryptAttempt(decryptCounter);
+          if (budget !== 'allow') {
+            if (budget === 'cap_reached_first') {
+              this.emitLog('warn', 'onboarding', 'decrypt_cap_reached', {
+                request_id: requestId,
+              });
+            }
+            return;
+          }
           try {
             const decrypted = nip44.v2.decrypt(
               normalizeNip44PayloadForJs(event.content),
