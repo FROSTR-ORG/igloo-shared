@@ -11,7 +11,7 @@ else
   RESOLVED_BIFROST_RS_DIR="${DEFAULT_BIFROST_RS_DIR}"
 fi
 BIFROST_RS_DIR="${RESOLVED_BIFROST_RS_DIR}"
-WASM_PKG_DIR="${IGLOO_SHARED_ROOT}/public/wasm"
+WASM_PKG_DIR="${IGLOO_SHARED_BROWSER_WASM_OUT_DIR:-${IGLOO_SHARED_ROOT}/public/wasm}"
 WASM_MODULES=(
   "crates/bifrost-bridge-wasm:bifrost_bridge_wasm"
   "crates/bifrost-profile-wasm:bifrost_profile_wasm"
