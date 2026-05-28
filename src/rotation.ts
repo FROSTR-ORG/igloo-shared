@@ -1,4 +1,5 @@
 import type { Event } from 'nostr-tools';
+import { nip19 } from 'nostr-tools';
 
 import { getWasmKeysetApi } from './bridge-wasm-runtime';
 import {
@@ -158,6 +159,56 @@ export async function buildRotationDraft(input: {
     ),
     sourceProfiles: input.sources,
   } satisfies BrowserRotationDraft;
+}
+
+export type BrowserRecoveredKey = {
+  nsec: string;
+  signingKeyHex: string;
+};
+
+/**
+ * Reconstruct the group secret key (nsec) from a set of recovered shares.
+ * Mirrors {@link buildRotationDraft}'s collection/validation, but instead of
+ * re-sharing the keyset it returns the reconstructed private key for display.
+ * The shares are never persisted; callers own auto-clearing the result.
+ */
+export async function recoverSecretKeyFromShares(input: {
+  sources: BrowserRotationRecoveredSource[];
+}): Promise<BrowserRecoveredKey> {
+  if (input.sources.length === 0) {
+    throw new Error('At least one share is required to recover the key.');
+  }
+  const [first, ...rest] = input.sources;
+  const threshold = first.profile.groupPackage.threshold;
+  if (input.sources.length < threshold) {
+    throw new Error(`Recovery requires at least ${threshold} shares.`);
+  }
+  for (const source of rest) {
+    if (source.groupId !== first.groupId) {
+      throw new Error('Recovery sources must all belong to the same group configuration.');
+    }
+    if (
+      groupPublicKeyFromPackage(source.profile.groupPackage) !==
+      groupPublicKeyFromPackage(first.profile.groupPackage)
+    ) {
+      throw new Error('Recovery sources must all belong to the same group public key.');
+    }
+  }
+
+  const api = await getWasmKeysetApi();
+  const signingKeyHex = normalizeHex32(
+    api.recover_secret_key_from_shares(
+      JSON.stringify({
+        group: JSON.parse(groupJsonFromPayload(first.profile)),
+        shares: input.sources.map((source) => JSON.parse(shareJsonFromPayload(source.profile))),
+      }),
+    ),
+    'recovered signing key',
+  );
+  const bytes = new Uint8Array(
+    (signingKeyHex.match(/.{2}/g) ?? []).map((byte) => Number.parseInt(byte, 16)),
+  );
+  return { nsec: nip19.nsecEncode(bytes), signingKeyHex };
 }
 
 export async function buildRotationDraftFromBfshares(input: {

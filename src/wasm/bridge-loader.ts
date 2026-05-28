@@ -21,6 +21,7 @@ function assertWasmBridgeModule(module: Partial<WasmBridgeModule>): AssertedWasm
     !module.build_onboarding_runtime_snapshot ||
     !module.create_keyset_bundle ||
     !module.rotate_keyset_bundle ||
+    !module.recover_secret_key_from_shares ||
     !module.derive_group_id
   ) {
     throw new Error('WASM bridge module loaded but required exports are missing');
@@ -140,6 +141,7 @@ export async function getWasmKeysetApi(): Promise<WasmKeysetApi> {
   return {
     create_keyset_bundle: module.create_keyset_bundle,
     rotate_keyset_bundle: module.rotate_keyset_bundle,
+    recover_secret_key_from_shares: module.recover_secret_key_from_shares,
     derive_group_id: module.derive_group_id,
   };
 }

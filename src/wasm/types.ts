@@ -71,6 +71,7 @@ export type WasmProfilePackageApi = {
 export type WasmKeysetApi = {
   create_keyset_bundle: (configJson: string) => string;
   rotate_keyset_bundle: (inputJson: string) => string;
+  recover_secret_key_from_shares: (inputJson: string) => string;
   derive_group_id: (groupJson: string) => string;
 };
 
@@ -114,6 +115,7 @@ export type WasmBridgeModule = {
   build_onboarding_runtime_snapshot: WasmBridgeOnboardingApi['build_onboarding_runtime_snapshot'];
   create_keyset_bundle: WasmKeysetApi['create_keyset_bundle'];
   rotate_keyset_bundle: WasmKeysetApi['rotate_keyset_bundle'];
+  recover_secret_key_from_shares: WasmKeysetApi['recover_secret_key_from_shares'];
   derive_group_id: WasmKeysetApi['derive_group_id'];
 };
 
@@ -123,6 +125,7 @@ export type WasmBridgeLoaderModule = WasmLoaderInitModule & {
   build_onboarding_runtime_snapshot?: WasmBridgeModule['build_onboarding_runtime_snapshot'];
   create_keyset_bundle?: WasmBridgeModule['create_keyset_bundle'];
   rotate_keyset_bundle?: WasmBridgeModule['rotate_keyset_bundle'];
+  recover_secret_key_from_shares?: WasmBridgeModule['recover_secret_key_from_shares'];
   derive_group_id?: WasmBridgeModule['derive_group_id'];
 };
 
