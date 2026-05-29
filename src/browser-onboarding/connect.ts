@@ -1,5 +1,5 @@
-import { createBrowserProfilePreview } from '../browser-profile';
-import { runtimePayloadFromSnapshot } from '../browser-runtime-session';
+import { createBrowserProfilePreview } from '../browser-profile/core';
+import { runtimePayloadFromSnapshot } from '../browser-profile/runtime-session';
 import { createProfilePackagePair, type BrowserProfilePackagePayload } from '../profile-package';
 import type {
   BrowserConnectedProfileInput,

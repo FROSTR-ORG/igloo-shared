@@ -98,13 +98,13 @@ export {
   profilePayloadFromRuntimeSnapshot,
   publicKeyFromSecret,
   shareJsonFromPayload,
-} from './browser-profile';
+} from './browser-profile/core';
 export type {
   BrowserProfileArtifactRefs,
   BrowserProfilePreview,
   BrowserProfileSource,
   BrowserRuntimeProfileSummary,
-} from './browser-profile';
+} from './browser-profile/core';
 
 // --- browser-profile-persistence ---
 export {
@@ -112,11 +112,11 @@ export {
   createBrowserPersistedProfileBundle,
   duplicateBrowserProfileMessage,
   publishBrowserProfileBackup,
-} from './browser-profile-persistence';
+} from './browser-profile/persistence';
 export type {
   BrowserDuplicateProfileInput,
   BrowserPersistedProfileBundle,
-} from './browser-profile-persistence';
+} from './browser-profile/persistence';
 
 // --- browser-profile-recovery ---
 export {
@@ -124,11 +124,11 @@ export {
   importBrowserProfilePackage,
   recoverAndSaveBrowserProfilePackage,
   recoverBrowserProfilePackage,
-} from './browser-profile-recovery';
+} from './browser-profile/recovery';
 export type {
   BrowserImportedProfilePackage,
   BrowserRecoveredProfilePackage,
-} from './browser-profile-recovery';
+} from './browser-profile/recovery';
 
 // --- browser-profile-save ---
 export {
@@ -139,13 +139,13 @@ export {
   saveImportedBrowserProfileAndMaybeActivate,
   saveRecoveredBrowserProfileAndMaybeActivate,
   saveRotatedBrowserProfileAndMaybeActivate,
-} from './browser-profile-save';
+} from './browser-profile/save';
 export type {
   BrowserPersistFinalizedProfile,
   BrowserPersistFinalizedProfileArgs,
   BrowserSaveActivateOptions,
   BrowserSaveResult,
-} from './browser-profile-save';
+} from './browser-profile/save';
 
 // --- browser-profile-store ---
 export {
@@ -156,7 +156,7 @@ export {
   createFinalizedBrowserStoredProfile,
   normalizeBrowserStoredProfilePayload,
   reconstructBrowserProfilePackagePayload,
-} from './browser-profile-store';
+} from './browser-profile/store';
 export type {
   BrowserFinalizedStoredProfile,
   BrowserRuntimeProfileProjection,
@@ -165,7 +165,7 @@ export type {
   BrowserStoredProfileProjection,
   BrowserStoredRuntimeProfile,
   NormalizedBrowserStoredProfilePayload,
-} from './browser-profile-store';
+} from './browser-profile/store';
 
 // --- runtime-api (split out of browser-runtime-core in PR30) ---
 export {
@@ -234,19 +234,20 @@ export {
   selectReadinessExplanation,
 } from './runtime-projections';
 
-// --- browser-session-orchestration ---
+// --- browser-profile/session-orchestration ---
 // `completeBrowserProfileSave`, `createRuntimeUnavailableWarning`,
 // `BrowserProfileSaveResult`, and `BrowserRuntimeWarning` are exported once
-// below via `browser-runtime-session` (which re-exports the same symbols);
-// re-listing them here would be a duplicate export, so they are omitted.
+// below via `browser-profile/runtime-session` (which re-exports the same
+// symbols); re-listing them here would be a duplicate export, so they are
+// omitted.
 
-// --- browser-runtime-session ---
+// --- browser-profile/runtime-session ---
 export {
   completeBrowserProfileSave,
   createBrowserRuntimeNodeInit,
   createRuntimeUnavailableWarning,
   runtimePayloadFromSnapshot,
-} from './browser-runtime-session';
+} from './browser-profile/runtime-session';
 export type {
   BrowserProfileRuntimeBootstrapInput,
   BrowserProfileSaveResult,
@@ -255,7 +256,7 @@ export type {
   BrowserRuntimeProfilePayload,
   BrowserRuntimeStoredProfile,
   BrowserRuntimeWarning,
-} from './browser-runtime-session';
+} from './browser-profile/runtime-session';
 
 // --- nip44-normalize ---
 export {

@@ -1,5 +1,5 @@
-import type { BrowserProfilePreview } from '../browser-profile';
-import type { BrowserFinalizedStoredProfile } from '../browser-profile-store';
+import type { BrowserProfilePreview } from '../browser-profile/core';
+import type { BrowserFinalizedStoredProfile } from '../browser-profile/store';
 import type {
   BrowserManualPeerPolicyOverride,
   BrowserProfilePackagePayload,

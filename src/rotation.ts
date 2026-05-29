@@ -6,7 +6,7 @@ import {
   normalizeHex32,
   publicKeyFromSecret,
   shareJsonFromPayload,
-} from './browser-profile';
+} from './browser-profile/core';
 import {
   createEncryptedProfileBackup,
   deriveProfileIdFromShareSecret,
