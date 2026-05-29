@@ -1,5 +1,18 @@
+// BrowserBridgeNode — the WASM-backed signer node.
+//
+// PR30: the class moved verbatim out of `browser-runtime-core.ts`. The
+// standalone helpers it relies on were split into topical modules:
+//   - `runtime-internal.ts`  — shared low-level utilities + constants
+//   - `relay-transport.ts`   — relay-URL normalization
+//   - `onboarding-transport.ts` — onboarding decode/validate + decrypt counter
+//   - `runtime-pump.ts`      — pending-command correlation + completion parsers
+// This module keeps the relay/SimplePool lifecycle, onboarding relay
+// round-trip, and tick/drain loop together on the class, because they share
+// the instance's mutable `this` state and are not separable without a
+// behavior-changing rewrite.
+
 import { SimplePool, getPublicKey, nip44, type Event, type Filter } from 'nostr-tools';
-import { getEventHash, validateEvent, verifyEvent } from 'nostr-tools/pure';
+import { getEventHash, verifyEvent } from 'nostr-tools/pure';
 
 import {
   createWasmBridgeRuntime,
@@ -7,7 +20,6 @@ import {
   type WasmBridgeRuntimeApi
 } from './bridge-wasm-runtime';
 import { decodeBfOnboardPackage } from './profile-package';
-import { createLogger } from './observability';
 import { RuntimeReadinessTimeoutError } from './errors';
 import {
   normalizeNip44PayloadForJs,
@@ -17,135 +29,70 @@ import {
   normalizeSignerSettings,
   type SignerSettings
 } from './signer-settings';
+import {
+  BIFROST_EVENT_KIND,
+  ONBOARD_TIMEOUT_MS,
+  PING_TIMEOUT_MS,
+  BRIDGE_COMMAND_TIMEOUT_MS,
+  PREPARE_OPERATION_TIMEOUT_MS,
+  WASM_RUNTIME_INIT_TIMEOUT_MS,
+  RELAY_CONNECT_TIMEOUT_MS,
+  logger,
+  withTimeout,
+  canProceedWhileDegraded,
+  nowUnixSecs,
+  isRecord,
+  toErrorMessage,
+  withContext,
+  normalizePubkey32Hex,
+  normalizeHex32,
+  hexToBytes,
+  allPolicyFlagsEnabled,
+  deriveConversationKeyFromSharedSecret,
+  buildUnsignedEvent
+} from './runtime-internal';
+import { normalizeRelays } from './relay-transport';
+import {
+  createOnboardingDecryptCounter,
+  recordOnboardingDecryptAttempt,
+  validateOnboardingGroup,
+  parseBridgeEnvelope,
+  parseOnboardingRequestBundle,
+  parseEventJson,
+  type PeerPolicyOverridePatch
+} from './onboarding-transport';
+import {
+  createPendingBridgeCommandState,
+  matchBridgeCompletion,
+  clearPendingCommand,
+  parsePingCompletion,
+  parseSignCompletion,
+  parseEcdhCompletion,
+  parseOperationFailure,
+  completionKind,
+  completionRequestId,
+  failureRequestId,
+  type PendingBridgeCommand,
+  type PendingBridgeCommandKind,
+  type PendingBridgeCommandState
+} from './runtime-pump';
 import type {
-  BridgeEnvelope,
   DecodedOnboardingProfile,
   GroupPackageWire,
   OnboardingDecoded,
   OnboardingRequestBundleWire,
   OnboardingRequestResult,
   OnboardResponseWire,
-  PolicyOverrideValue,
   ProfileBootstrapState,
   RuntimeConfig,
   RuntimeEvent,
   RuntimeMetadata,
-  RuntimePeerPermissionState,
   RuntimePeerStatus,
   RuntimeReadiness,
-  RuntimeReadinessExplanation,
   RuntimeRestoreOptions,
   RuntimeSnapshotWire,
   RuntimeStatusSummary
 } from './wire';
-
-const DEFAULT_RELAYS_FALLBACK = ['ws://127.0.0.1:8194'];
-const BROWSER_RUNTIME_ENV = ((import.meta as ImportMeta & {
-  env?: Record<string, string | undefined>;
-}).env ?? {});
-
-function envDefaultRelays(): string[] {
-  const raw = BROWSER_RUNTIME_ENV.VITE_DEFAULT_RELAYS;
-  if (typeof raw !== 'string' || raw.trim().length === 0) {
-    return DEFAULT_RELAYS_FALLBACK;
-  }
-  const parsed = raw
-    .split(/[,\s]+/)
-    .map((relay) => relay.trim())
-    .filter(Boolean);
-  return parsed.length ? parsed : DEFAULT_RELAYS_FALLBACK;
-}
-
-export const DEFAULT_RELAYS = envDefaultRelays();
-
-const BIFROST_EVENT_KIND_RAW = Number(BROWSER_RUNTIME_ENV.VITE_BIFROST_EVENT_KIND ?? 20000);
-const BIFROST_EVENT_KIND = Number.isFinite(BIFROST_EVENT_KIND_RAW)
-  ? BIFROST_EVENT_KIND_RAW
-  : 20000;
-const ONBOARD_TIMEOUT_MS = 10_000;
-/**
- * Maximum number of decrypt attempts allowed per onboarding request window.
- *
- * An adversarial relay could otherwise flood the onevent handler with
- * malformed envelopes. Rejecting after a fixed budget bounds worst-case
- * CPU use and makes the abuse observable via `decrypt_cap_reached`. The
- * counter is scoped to the requestId; a fresh onboarding request starts
- * fresh. The 30s window matches the onboarding timeout; once the outer
- * subscription closes, further events are ignored regardless.
- */
-export const MAX_ONBOARDING_DECRYPTS = 50;
-const PING_TIMEOUT_MS = 10_000;
-const BRIDGE_COMMAND_TIMEOUT_MS = 10_000;
-const PREPARE_OPERATION_TIMEOUT_MS = 10_000;
-const WASM_RUNTIME_INIT_TIMEOUT_MS = 10_000;
-const RELAY_CONNECT_TIMEOUT_MS = 10_000;
-const RECOVERED_PENDING_OPS_REASON = 'pending_operations_recovered';
-const INSUFFICIENT_SIGNING_PEERS_REASON = 'insufficient_signing_peers';
-const INSUFFICIENT_ECDH_PEERS_REASON = 'insufficient_ecdh_peers';
-const logger = createLogger('igloo.runtime');
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  return await Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
-    })
-  ]);
-}
-
-function canProceedWhileDegraded(kind: 'sign' | 'ecdh', degradedReasons: string[]) {
-  if (degradedReasons.length === 0) {
-    return false;
-  }
-
-  const allowedReasons =
-    kind === 'sign'
-      ? new Set([RECOVERED_PENDING_OPS_REASON, INSUFFICIENT_ECDH_PEERS_REASON])
-      : new Set([RECOVERED_PENDING_OPS_REASON, INSUFFICIENT_SIGNING_PEERS_REASON]);
-
-  return degradedReasons.every((reason) => allowedReasons.has(reason));
-}
-
-export function deriveReadinessExplanation(
-  runtimeStatus: RuntimeStatusSummary
-): RuntimeReadinessExplanation {
-  const { readiness, peers } = runtimeStatus;
-  const signInitiatorPeers = peers.filter((peer) => peer.can_sign).map((peer) => peer.pubkey);
-  const signResponderPeers = peers
-    .filter((peer) => peer.online && peer.outgoing_available > 0)
-    .map((peer) => peer.pubkey);
-  const ecdhReadyPeers = peers.filter((peer) => peer.online).map((peer) => peer.pubkey);
-
-  return {
-    runtime_ready: readiness.runtime_ready,
-    restore_complete: readiness.restore_complete,
-    sign_ready: readiness.sign_ready,
-    ecdh_ready: readiness.ecdh_ready,
-    threshold: readiness.threshold,
-    signing_peer_count: readiness.signing_peer_count,
-    ecdh_peer_count: readiness.ecdh_peer_count,
-    last_refresh_at: readiness.last_refresh_at,
-    degraded_reasons: readiness.degraded_reasons,
-    operations: {
-      sign_initiator_ready: readiness.sign_ready,
-      sign_responder_ready: signResponderPeers.length >= readiness.threshold,
-      ecdh_ready: readiness.ecdh_ready,
-      sign_initiator_peer_count: signInitiatorPeers.length,
-      sign_responder_peer_count: signResponderPeers.length,
-      ecdh_peer_count: ecdhReadyPeers.length,
-      sign_initiator_peers: signInitiatorPeers,
-      sign_responder_peers: signResponderPeers,
-      ecdh_ready_peers: ecdhReadyPeers,
-      missing_sign_initiator_peers: peers
-        .filter((peer) => !peer.can_sign)
-        .map((peer) => peer.pubkey),
-      missing_sign_responder_peers: peers
-        .filter((peer) => !(peer.online && peer.outgoing_available > 0))
-        .map((peer) => peer.pubkey),
-      missing_ecdh_peers: peers.filter((peer) => !peer.online).map((peer) => peer.pubkey)
-    }
-  };
-}
 
 export type ValidationResult = {
   isValid: boolean;
@@ -171,23 +118,6 @@ export type NodeWithEvents = {
   removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
 };
 
-export function validateOnboardingPassword(value: string): ValidationResult {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return { isValid: false, error: 'Password is required' };
-  }
-  if (trimmed.length < 8) {
-    return { isValid: false, error: 'Password must be at least 8 characters' };
-  }
-  return { isValid: true };
-}
-
-type PeerPolicyOverridePatch = {
-  direction: 'request' | 'respond';
-  method: 'ping' | 'onboard' | 'sign' | 'ecdh';
-  value: PolicyOverrideValue;
-};
-
 type PendingPing = {
   peer: string;
   startedAtMs: number;
@@ -195,465 +125,7 @@ type PendingPing = {
   resolve: (value: PingResult) => void;
 };
 
-/** @internal */
-export type PendingBridgeCommandKind = 'sign' | 'ecdh';
-
-/**
- * Pending bridge command entry. Dispatch is keyed by `requestId` — the
- * identifier used to correlate the command with its completion. `kind` is
- * retained for observability only; it is NOT used for correlation.
- *
- * `status` tracks whether a timeout has already consumed the promise. A
- * timed-out entry is kept in the per-kind FIFO as a tombstone so that a
- * late-arriving completion matches against it (and is surfaced as a stale
- * completion observability event) instead of silently binding to a newer
- * in-flight command of the same kind.
- *
- * @internal
- */
-export type PendingBridgeCommand = {
-  requestId: string;
-  kind: PendingBridgeCommandKind;
-  resolve: (value: string) => void;
-  reject: (error: Error) => void;
-  timeoutHandle: ReturnType<typeof setTimeout>;
-  status: 'pending' | 'timed_out';
-};
-
-/**
- * Mutable state shared between `runBridgeCommand`, the runtime-pump
- * dispatcher, and shutdown. Split out as a struct so the correlation logic
- * can be unit-tested without instantiating the full WASM-backed node.
- *
- * @internal
- */
-export type PendingBridgeCommandState = {
-  commands: Map<string, PendingBridgeCommand>;
-  kindFifo: Record<PendingBridgeCommandKind, string[]>;
-};
-
-/** @internal */
-export function createPendingBridgeCommandState(): PendingBridgeCommandState {
-  return {
-    commands: new Map(),
-    kindFifo: { sign: [], ecdh: [] },
-  };
-}
-
-/**
- * Outcome of dispatching a completion against the pending-command state.
- * Exposed so tests can observe dispatch decisions without touching the
- * resolve/reject plumbing.
- *
- * @internal
- */
-export type BridgeDispatchOutcome =
-  | { kind: 'resolved'; entry: PendingBridgeCommand }
-  | { kind: 'stale'; requestId: string; op: PendingBridgeCommandKind };
-
-/**
- * Match a completion's `(kind, request_id)` against the pending-command
- * state. Removes the matched entry (whether consumed or stale) and returns
- * a description of what happened.
- *
- * @internal
- */
-export function matchBridgeCompletion(
-  state: PendingBridgeCommandState,
-  kind: PendingBridgeCommandKind,
-  completionRequestId: string,
-): BridgeDispatchOutcome {
-  const direct = state.commands.get(completionRequestId);
-  if (direct && direct.kind === kind) {
-    state.commands.delete(completionRequestId);
-    const fifo = state.kindFifo[kind];
-    const idx = fifo.indexOf(completionRequestId);
-    if (idx >= 0) fifo.splice(idx, 1);
-    if (direct.status === 'pending') {
-      return { kind: 'resolved', entry: direct };
-    }
-    return { kind: 'stale', requestId: completionRequestId, op: kind };
-  }
-
-  const fifo = state.kindFifo[kind];
-  const oldestKey = fifo.shift();
-  if (oldestKey === undefined) {
-    return { kind: 'stale', requestId: completionRequestId, op: kind };
-  }
-  const entry = state.commands.get(oldestKey);
-  state.commands.delete(oldestKey);
-  if (!entry) {
-    return { kind: 'stale', requestId: completionRequestId, op: kind };
-  }
-  if (entry.status === 'timed_out') {
-    return { kind: 'stale', requestId: completionRequestId, op: kind };
-  }
-  entry.requestId = completionRequestId;
-  return { kind: 'resolved', entry };
-}
-
-/**
- * Per-request decrypt budget tracker for the onboarding subscription.
- *
- * Scoped to a single onboarding request (by `requestId`) rather than
- * globally so a legitimate operator retry is not penalized by a prior
- * adversarial burst. Once the counter hits the cap, further decrypt
- * attempts are refused; the first refusal trips the `capWarned` flag so
- * a single `decrypt_cap_reached` observability event is emitted per
- * request window rather than once per dropped event.
- *
- * @internal
- */
-export type OnboardingDecryptCounter = {
-  attempts: number;
-  capWarned: boolean;
-};
-
-/** @internal */
-export function createOnboardingDecryptCounter(): OnboardingDecryptCounter {
-  return { attempts: 0, capWarned: false };
-}
-
-/**
- * Advance the decrypt budget. Returns `'cap_reached_first'` exactly once
- * per onboarding window (when the cap is first crossed), `'cap_reached'`
- * for subsequent refusals, and `'allow'` while budget remains. Callers
- * emit the `decrypt_cap_reached` event only on the `'cap_reached_first'`
- * outcome.
- *
- * @internal
- */
-export function recordOnboardingDecryptAttempt(
-  counter: OnboardingDecryptCounter,
-  maxAttempts: number = MAX_ONBOARDING_DECRYPTS,
-): 'allow' | 'cap_reached_first' | 'cap_reached' {
-  if (counter.attempts >= maxAttempts) {
-    if (!counter.capWarned) {
-      counter.capWarned = true;
-      return 'cap_reached_first';
-    }
-    return 'cap_reached';
-  }
-  counter.attempts += 1;
-  return 'allow';
-}
-
-/**
- * Outcome of validating a decrypted onboarding group descriptor.
- *
- * The TS/Rust split in the onboarding pathway is:
- *   - TS (this function) owns input validation: structural shape, member
- *     uniqueness, threshold bounds, presence of the local share pubkey in
- *     the member set. These checks cannot depend on secret material.
- *   - bifrost-rs (`build_onboarding_runtime_snapshot`) owns cryptographic
- *     validation: signatures, threshold-signature correctness, share
- *     validity.
- * Both sides must pass. A failing TS-side check drops the event and
- * surfaces a scalar observability signal; the payload never reaches WASM.
- *
- * @internal
- */
-export type OnboardingGroupValidation =
-  | { kind: 'ok'; memberCount: number; threshold: number }
-  | { kind: 'malformed' }
-  | { kind: 'peer_not_in_group' }
-  | { kind: 'duplicate_members' }
-  | { kind: 'bad_threshold' };
-
-/**
- * Validate the `group` subobject of a decrypted OnboardResponse envelope
- * before handing it to the runtime. See `OnboardingGroupValidation` for
- * the per-outcome semantics.
- *
- * `sharePubkey32` is the caller's share x-only pubkey in lowercase hex.
- * Member pubkeys may be 32-byte (x-only, 64 hex chars) or 33-byte
- * (compressed, 66 hex chars with `02`/`03` prefix); both encodings are
- * accepted and the membership test matches on the trailing 32-byte
- * component.
- *
- * @internal
- */
-export function validateOnboardingGroup(
-  group: unknown,
-  sharePubkey32: string,
-): OnboardingGroupValidation {
-  if (!isRecord(group)) return { kind: 'malformed' };
-  const members = group.members;
-  if (!Array.isArray(members) || members.length < 1) {
-    return { kind: 'malformed' };
-  }
-
-  const memberPubkeys: string[] = [];
-  for (const entry of members) {
-    if (!isRecord(entry) || typeof entry.pubkey !== 'string') {
-      return { kind: 'malformed' };
-    }
-    memberPubkeys.push(entry.pubkey.toLowerCase());
-  }
-
-  const sharePubkeyLower = sharePubkey32.toLowerCase();
-  if (!memberPubkeys.some((pk) => pk.endsWith(sharePubkeyLower))) {
-    return { kind: 'peer_not_in_group' };
-  }
-
-  const uniqueMembers = new Set(memberPubkeys);
-  if (uniqueMembers.size !== memberPubkeys.length) {
-    return { kind: 'duplicate_members' };
-  }
-
-  const threshold = group.threshold;
-  if (
-    typeof threshold !== 'number' ||
-    !Number.isFinite(threshold) ||
-    !Number.isInteger(threshold) ||
-    threshold < 1 ||
-    threshold > memberPubkeys.length
-  ) {
-    return { kind: 'bad_threshold' };
-  }
-
-  return {
-    kind: 'ok',
-    memberCount: memberPubkeys.length,
-    threshold,
-  };
-}
-
-const ensureArray = (value: string[]) =>
-  Array.from(new Set(value.map((relay) => relay.replace(/\/$/, ''))));
-
-function nowUnixSecs(): number {
-  return Math.floor(Date.now() / 1000);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function toErrorMessage(value: unknown, fallback = 'Request failed'): string {
-  if (typeof value === 'string' && value.trim()) return value;
-  if (value instanceof Error && value.message) return value.message;
-  if (isRecord(value)) {
-    const message = value.message;
-    if (typeof message === 'string' && message.trim()) return message;
-    const error = value.error;
-    if (typeof error === 'string' && error.trim()) return error;
-    const reason = value.reason;
-    if (typeof reason === 'string' && reason.trim()) return reason;
-  }
-  return fallback;
-}
-
-function withContext(step: string, error: unknown): Error {
-  return new Error(`${step}: ${toErrorMessage(error, 'unknown error')}`);
-}
-
-function isRelayUrl(value: string): boolean {
-  return /^wss?:\/\/.+/.test(value);
-}
-
-function normalizePubkey32Hex(value: string, label: string): string {
-  const normalized = value.trim().toLowerCase();
-  if (/^[0-9a-f]{64}$/.test(normalized)) {
-    return normalized;
-  }
-  if (/^(02|03)[0-9a-f]{64}$/.test(normalized)) {
-    return normalized.slice(2);
-  }
-  throw new Error(`Invalid ${label}`);
-}
-
-function normalizeHex32(value: string, label: string): string {
-  const normalized = value.trim().toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(normalized)) {
-    throw new Error(`Invalid ${label}`);
-  }
-  return normalized;
-}
-
-function hexToBytes(value: string): Uint8Array {
-  const hex = value.trim().toLowerCase();
-  if (!/^[0-9a-f]+$/.test(hex) || hex.length % 2 !== 0) {
-    throw new Error('Invalid hex payload');
-  }
-
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
-}
-
-function parseBridgeEnvelope(value: string): BridgeEnvelope | null {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!isRecord(parsed)) return null;
-    if (typeof parsed.request_id !== 'string') return null;
-    if (!isRecord(parsed.payload)) return null;
-    if (typeof parsed.payload.type !== 'string') return null;
-    return {
-      request_id: parsed.request_id,
-      sent_at: Number(parsed.sent_at ?? 0),
-      payload: {
-        type: parsed.payload.type,
-        data: parsed.payload.data
-      }
-    };
-  } catch {
-    return null;
-  }
-}
-
-function parseOnboardingRequestBundle(value: string): OnboardingRequestBundleWire {
-  const parsed = JSON.parse(value) as unknown;
-  if (!isRecord(parsed)) {
-    throw new Error('Invalid onboarding request bundle');
-  }
-  if (typeof parsed.request_id !== 'string' || !parsed.request_id.trim()) {
-    throw new Error('Invalid onboarding request id');
-  }
-  if (typeof parsed.local_pubkey32 !== 'string' || !parsed.local_pubkey32.trim()) {
-    throw new Error('Invalid onboarding local pubkey');
-  }
-  if (!Array.isArray(parsed.request_nonces)) {
-    throw new Error('Invalid onboarding request nonces');
-  }
-  if (typeof parsed.bootstrap_state_hex !== 'string' || !parsed.bootstrap_state_hex.trim()) {
-    throw new Error('Invalid onboarding bootstrap state');
-  }
-  if (typeof parsed.event_json !== 'string' || !parsed.event_json.trim()) {
-    throw new Error('Invalid onboarding request event');
-  }
-  return parsed as OnboardingRequestBundleWire;
-}
-
-function parseEventJson(value: string, context: string): Event {
-  const parsed = JSON.parse(value) as unknown;
-  if (!isRecord(parsed)) {
-    throw new Error(`Invalid ${context}`);
-  }
-  return parsed as Event;
-}
-
-function allPolicyFlagsEnabled(value: unknown): boolean {
-  if (!isRecord(value)) return true;
-  const flags = ['echo', 'ping', 'onboard', 'sign', 'ecdh'];
-  return flags.every((key) => value[key] !== false);
-}
-
-function parsePingCompletion(completion: unknown): { requestId: string; peer: string } | null {
-  if (!isRecord(completion)) return null;
-  const payload = completion.Ping;
-  if (!isRecord(payload)) return null;
-
-  const requestId = payload.request_id;
-  const peer = payload.peer;
-  if (typeof requestId !== 'string' || typeof peer !== 'string') return null;
-  return { requestId, peer };
-}
-
-function parseSignCompletion(
-  completion: unknown
-): { requestId: string; signatures: string[] } | null {
-  if (!isRecord(completion)) return null;
-  const payload = completion.Sign;
-  if (!isRecord(payload) || !Array.isArray(payload.signatures_hex64)) return null;
-  if (typeof payload.request_id !== 'string') return null;
-  const signatures = payload.signatures_hex64.filter(
-    (value): value is string => typeof value === 'string'
-  );
-  return signatures.length > 0
-    ? { requestId: payload.request_id, signatures }
-    : null;
-}
-
-function parseEcdhCompletion(
-  completion: unknown
-): { requestId: string; sharedSecretHex32: string } | null {
-  if (!isRecord(completion)) return null;
-  const payload = completion.Ecdh;
-  if (!isRecord(payload) || typeof payload.shared_secret_hex32 !== 'string') return null;
-  if (typeof payload.request_id !== 'string') return null;
-  return {
-    requestId: payload.request_id,
-    sharedSecretHex32: payload.shared_secret_hex32.toLowerCase(),
-  };
-}
-
-function parseOperationFailure(
-  failure: unknown
-): { opType: string; message: string } | null {
-  if (!isRecord(failure)) return null;
-  if (typeof failure.op_type !== 'string' || typeof failure.message !== 'string') return null;
-  return { opType: failure.op_type, message: failure.message };
-}
-
-/**
- * Extract the kind tag from a completion payload without pulling any
- * structured (secret-bearing) sub-fields. Returns `'ping' | 'sign' | 'ecdh'`
- * when the payload matches a known shape; `'unknown'` otherwise.
- */
-function completionKind(completion: unknown): string {
-  if (!isRecord(completion)) return 'unknown';
-  if (isRecord(completion.Ping)) return 'ping';
-  if (isRecord(completion.Sign)) return 'sign';
-  if (isRecord(completion.Ecdh)) return 'ecdh';
-  return 'unknown';
-}
-
-/** Extract `request_id` from a completion payload, or return `undefined`. */
-function completionRequestId(completion: unknown): string | undefined {
-  if (!isRecord(completion)) return undefined;
-  for (const payload of [completion.Ping, completion.Sign, completion.Ecdh]) {
-    if (isRecord(payload) && typeof payload.request_id === 'string') {
-      return payload.request_id;
-    }
-  }
-  return undefined;
-}
-
-/** Extract `request_id` from a failure payload, or return `undefined`. */
-function failureRequestId(failure: unknown): string | undefined {
-  if (!isRecord(failure)) return undefined;
-  return typeof failure.request_id === 'string' ? failure.request_id : undefined;
-}
-
-function clearPendingCommand(pending: PendingBridgeCommand | null | undefined) {
-  if (!pending) return;
-  clearTimeout(pending.timeoutHandle);
-}
-
-async function deriveConversationKeyFromSharedSecret(sharedSecretHex32: string): Promise<Uint8Array> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode('nip44-v2'),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const sharedSecretBytes = new Uint8Array(hexToBytes(sharedSecretHex32));
-  const digest = await crypto.subtle.sign('HMAC', key, sharedSecretBytes);
-  return new Uint8Array(digest);
-}
-
-function buildUnsignedEvent(event: Record<string, unknown>, pubkey: string) {
-  const candidate = {
-    kind: event.kind,
-    tags: event.tags ?? [],
-    content: event.content ?? '',
-    created_at:
-      typeof event.created_at === 'number' ? event.created_at : Math.floor(Date.now() / 1000),
-    pubkey
-  };
-
-  if (!validateEvent(candidate)) {
-    throw new Error('Event failed validation');
-  }
-
-  return candidate;
-}
-
-class BrowserBridgeNode implements NodeWithEvents {
+export class BrowserBridgeNode implements NodeWithEvents {
   private handlers = new Map<string, Set<(...args: unknown[]) => void>>();
   private pool: SimplePool | null = null;
   private relaySubscription: { close: (reason?: string) => void } | null = null;
@@ -2054,305 +1526,10 @@ class BrowserBridgeNode implements NodeWithEvents {
   }
 }
 
-function isBrowserBridgeNode(node: NodeWithEvents): node is BrowserBridgeNode {
+export function isBrowserBridgeNode(node: NodeWithEvents): node is BrowserBridgeNode {
   return (
     typeof (node as BrowserBridgeNode).connect === 'function' &&
     typeof (node as BrowserBridgeNode).shutdown === 'function' &&
     typeof (node as BrowserBridgeNode).fetchPeers === 'function'
   );
-}
-
-export async function decodeOnboardingProfile(
-  value: string,
-  password: string
-): Promise<DecodedOnboardingProfile> {
-  const decoded = await decodeBfOnboardPackage(value.trim(), password);
-  const shareSecret = decoded.shareSecret;
-  const publicKey =
-    typeof shareSecret === 'string' ? getPublicKey(hexToBytes(shareSecret)).toLowerCase() : null;
-  const peerPubkey = decoded.peerPubkey;
-  const relays = decoded.relays;
-
-  if (typeof publicKey !== 'string' || publicKey.length !== 64) {
-    throw new Error('Decoded onboarding payload is missing a valid share pubkey');
-  }
-
-  if (typeof peerPubkey !== 'string' || peerPubkey.length !== 64) {
-    throw new Error('Decoded onboarding payload is missing a valid peer pubkey');
-  }
-
-  return {
-    publicKey: publicKey.toLowerCase(),
-    peerPubkey: peerPubkey.toLowerCase(),
-    relays: Array.isArray(relays)
-      ? relays.filter((relay): relay is string => typeof relay === 'string')
-      : []
-  };
-}
-
-export function validateOnboardCredential(value: string): ValidationResult {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return { isValid: false, error: 'Onboarding package is required' };
-  }
-
-  if (!trimmed.startsWith('bfonboard1')) {
-    return { isValid: false, error: 'Onboarding package must start with bfonboard1' };
-  }
-
-  if (!/^bfonboard1[023456789acdefghjklmnpqrstuvwxyz]+$/.test(trimmed)) {
-    return { isValid: false, error: 'Onboarding package must be valid bech32m text' };
-  }
-
-  if (trimmed.length < 48) {
-    return { isValid: false, error: 'Onboarding package is too short' };
-  }
-
-  return { isValid: true };
-}
-
-export function normalizeRelays(relays: string[]): { relays: string[]; errors: string[] } {
-  const base = relays.filter((relay) => typeof relay === 'string' && relay.trim().length > 0);
-  const normalized = ensureArray(base.map((relay) => relay.trim()));
-
-  const valid = normalized.filter(isRelayUrl);
-  const errors = normalized
-    .filter((relay) => !isRelayUrl(relay))
-    .map((relay) => `Invalid relay URL: ${relay}`);
-
-  return {
-    relays: valid.length ? valid : DEFAULT_RELAYS,
-    errors
-  };
-}
-
-export function createSignerNode(
-  config: RuntimeConfig,
-  restoreOptions?: RuntimeRestoreOptions
-): NodeWithEvents {
-  return new BrowserBridgeNode(config, restoreOptions);
-}
-
-export async function connectSignerNode(node: NodeWithEvents) {
-  if (!isBrowserBridgeNode(node)) {
-    throw new Error('Unsupported signer node implementation');
-  }
-  await node.connect();
-}
-
-export async function startSignerNode(config: RuntimeConfig) {
-  const node = createSignerNode(config);
-  await connectSignerNode(node);
-  return node;
-}
-
-export function stopSignerNode(node: NodeWithEvents | null) {
-  if (!node || !isBrowserBridgeNode(node)) return;
-  void node.shutdown();
-}
-
-export async function refreshPeerStatuses(
-  node: NodeWithEvents,
-  peers: PeerPolicy[]
-): Promise<PeerPolicy[]> {
-  if (!isBrowserBridgeNode(node)) return peers;
-
-  try {
-    return await node.fetchPeers(peers);
-  } catch (error) {
-    logger.warn('ui', 'refresh_peers_failed', {
-      error_message: toErrorMessage(error, 'failed to refresh peer status')
-    });
-    return peers;
-  }
-}
-
-export async function pingSinglePeer(node: NodeWithEvents, pubkey: string): Promise<PingResult> {
-  if (!isBrowserBridgeNode(node)) {
-    return { success: false, error: 'Unsupported signer node implementation' };
-  }
-
-  try {
-    return await node.pingPeer(pubkey);
-  } catch (error) {
-    return {
-      success: false,
-      error: toErrorMessage(error, 'Ping failed')
-    };
-  }
-}
-
-export function detachEvent(
-  node: NodeWithEvents,
-  event: string,
-  handler: (...args: unknown[]) => void
-) {
-  try {
-    if (typeof node.off === 'function') {
-      node.off(event, handler);
-    } else if (typeof node.removeListener === 'function') {
-      node.removeListener(event, handler);
-    }
-  } catch (error) {
-    logger.warn('runtime', 'detach_listener_failed', {
-      event_name: event,
-      error_message: toErrorMessage(error, `Failed to detach event ${event}`)
-    });
-  }
-}
-
-export async function signNostrEvent(
-  node: NodeWithEvents,
-  event: Record<string, unknown>
-): Promise<Event> {
-  if (!isBrowserBridgeNode(node) || typeof node.signNostrEvent !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return await node.signNostrEvent(event);
-}
-
-export function getPublicKeyFromNode(node: NodeWithEvents): string {
-  if (!isBrowserBridgeNode(node) || typeof node.getPublicKey !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return node.getPublicKey();
-}
-
-export function getSharePublicKeyFromNode(node: NodeWithEvents): string {
-  if (!isBrowserBridgeNode(node) || typeof node.getSharePublicKey !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return node.getSharePublicKey();
-}
-
-export function getRuntimeConfigFromNode(node: NodeWithEvents): SignerSettings {
-  if (!isBrowserBridgeNode(node) || typeof node.readConfig !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return node.readConfig();
-}
-
-export function getRuntimePeerPermissionStatesFromNode(
-  node: NodeWithEvents
-): RuntimePeerPermissionState[] {
-  if (!isBrowserBridgeNode(node) || typeof node.peerPermissionStates !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  const states = JSON.parse(node.peerPermissionStates()) as RuntimePeerPermissionState[];
-  return Array.isArray(states)
-    ? [...states].sort((a, b) => a.pubkey.localeCompare(b.pubkey))
-    : [];
-}
-
-export async function updateRuntimePeerPolicyOverrideOnNode(
-  node: NodeWithEvents,
-  pubkey: string,
-  patch: PeerPolicyOverridePatch
-) {
-  if (!isBrowserBridgeNode(node) || typeof node.updatePeerPolicyOverride !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  await node.updatePeerPolicyOverride(pubkey, patch);
-}
-
-export async function clearRuntimePeerPolicyOverridesOnNode(node: NodeWithEvents) {
-  if (!isBrowserBridgeNode(node) || typeof node.clearPeerPolicyOverrides !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  await node.clearPeerPolicyOverrides();
-}
-
-export function updateRuntimeConfigOnNode(
-  node: NodeWithEvents,
-  settings: Partial<SignerSettings>
-): void {
-  if (!isBrowserBridgeNode(node) || typeof node.updateConfig !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  node.updateConfig(settings);
-}
-
-export function getRuntimeMetadata(node: NodeWithEvents): RuntimeMetadata {
-  if (!isBrowserBridgeNode(node) || typeof node.runtimeMetadata !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return node.runtimeMetadata();
-}
-
-export function getRuntimePeerStatus(node: NodeWithEvents): RuntimePeerStatus[] {
-  if (!isBrowserBridgeNode(node) || typeof node.runtimePeerStatus !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return node.runtimePeerStatus();
-}
-
-export function getRuntimeReadiness(node: NodeWithEvents): RuntimeReadiness {
-  if (!isBrowserBridgeNode(node) || typeof node.runtimeReadiness !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return node.runtimeReadiness();
-}
-
-export function refreshAllPeersOnNode(node: NodeWithEvents): void {
-  if (!isBrowserBridgeNode(node) || typeof node.refreshAllPeers !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  node.refreshAllPeers();
-}
-
-export function wipeRuntimeStateOnNode(node: NodeWithEvents): void {
-  if (!isBrowserBridgeNode(node) || typeof node.wipeState !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  node.wipeState();
-}
-
-export async function prepareSignOnNode(node: NodeWithEvents): Promise<RuntimeReadiness> {
-  if (!isBrowserBridgeNode(node) || typeof node.prepareSign !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return await node.prepareSign();
-}
-
-export async function prepareEcdhOnNode(node: NodeWithEvents): Promise<RuntimeReadiness> {
-  if (!isBrowserBridgeNode(node) || typeof node.prepareEcdh !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return await node.prepareEcdh();
-}
-
-export async function nip44EncryptWithNode(
-  node: NodeWithEvents,
-  pubkey: string,
-  plaintext: string
-): Promise<string> {
-  if (!isBrowserBridgeNode(node) || typeof node.nip44Encrypt !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return await node.nip44Encrypt(pubkey, plaintext);
-}
-
-export async function nip44DecryptWithNode(
-  node: NodeWithEvents,
-  pubkey: string,
-  ciphertext: string
-): Promise<string> {
-  if (!isBrowserBridgeNode(node) || typeof node.nip44Decrypt !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return await node.nip44Decrypt(pubkey, ciphertext);
-}
-
-export function getRuntimeSnapshot(node: NodeWithEvents): unknown {
-  if (!isBrowserBridgeNode(node) || typeof node.snapshotRuntimeState !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return node.snapshotRuntimeState();
-}
-
-export function getRuntimeStatus(node: NodeWithEvents): RuntimeStatusSummary {
-  if (!isBrowserBridgeNode(node) || typeof node.runtimeStatus !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
-  return node.runtimeStatus();
 }

@@ -167,7 +167,7 @@ export type {
   NormalizedBrowserStoredProfilePayload,
 } from './browser-profile-store';
 
-// --- browser-runtime-core ---
+// --- runtime-api (split out of browser-runtime-core in PR30) ---
 export {
   DEFAULT_RELAYS,
   MAX_ONBOARDING_DECRYPTS,
@@ -207,7 +207,7 @@ export {
   validateOnboardingGroup,
   validateOnboardingPassword,
   wipeRuntimeStateOnNode,
-} from './browser-runtime-core';
+} from './runtime-api';
 export type {
   BridgeDispatchOutcome,
   NodeWithEvents,
@@ -219,7 +219,7 @@ export type {
   PendingBridgeCommandState,
   PingResult,
   ValidationResult,
-} from './browser-runtime-core';
+} from './runtime-api';
 
 // --- browser-session-orchestration ---
 // `completeBrowserProfileSave`, `createRuntimeUnavailableWarning`,

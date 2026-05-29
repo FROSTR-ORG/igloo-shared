@@ -1,4 +1,4 @@
-import { DEFAULT_RELAYS, normalizeRelays } from '../browser-runtime-core';
+import { DEFAULT_RELAYS, normalizeRelays } from '../relay-transport';
 import {
   deriveProfileIdFromShareSecret,
   type BrowserManualPeerPolicyOverride,

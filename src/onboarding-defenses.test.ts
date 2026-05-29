@@ -5,7 +5,7 @@ import {
   createOnboardingDecryptCounter,
   recordOnboardingDecryptAttempt,
   validateOnboardingGroup,
-} from './browser-runtime-core';
+} from './onboarding-transport';
 
 const SHARE_X_ONLY = 'aa'.repeat(32);
 const SHARE_COMPRESSED = `02${SHARE_X_ONLY}`;

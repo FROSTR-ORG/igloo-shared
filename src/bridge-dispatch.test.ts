@@ -6,7 +6,7 @@ import {
   type PendingBridgeCommand,
   type PendingBridgeCommandKind,
   type PendingBridgeCommandState,
-} from './browser-runtime-core';
+} from './runtime-pump';
 import {
   EVENT_SCHEMAS,
   hasEventSchema,

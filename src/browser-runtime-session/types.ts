@@ -1,4 +1,4 @@
-import { createSignerNode } from '../browser-runtime-core';
+import { createSignerNode } from '../runtime-api';
 import type { BrowserProfilePackagePayload } from '../profile-package';
 import type { SignerSettings } from '../signer-settings';
 
