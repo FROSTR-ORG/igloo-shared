@@ -1,4 +1,4 @@
-import type { RuntimePeerPermissionState } from '../browser-runtime-core';
+import type { RuntimePeerPermissionState } from '../wire';
 import { createDefaultManualPeerPolicy } from '../browser-profile';
 import type { BrowserManualPeerPolicyOverride } from '../profile-package';
 import type { SignerSettings } from '../signer-settings';

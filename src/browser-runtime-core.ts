@@ -17,6 +17,27 @@ import {
   normalizeSignerSettings,
   type SignerSettings
 } from './signer-settings';
+import type {
+  BridgeEnvelope,
+  DecodedOnboardingProfile,
+  GroupPackageWire,
+  OnboardingDecoded,
+  OnboardingRequestBundleWire,
+  OnboardingRequestResult,
+  OnboardResponseWire,
+  PolicyOverrideValue,
+  ProfileBootstrapState,
+  RuntimeConfig,
+  RuntimeEvent,
+  RuntimeMetadata,
+  RuntimePeerPermissionState,
+  RuntimePeerStatus,
+  RuntimeReadiness,
+  RuntimeReadinessExplanation,
+  RuntimeRestoreOptions,
+  RuntimeSnapshotWire,
+  RuntimeStatusSummary
+} from './wire';
 
 const DEFAULT_RELAYS_FALLBACK = ['ws://127.0.0.1:8194'];
 const BROWSER_RUNTIME_ENV = ((import.meta as ImportMeta & {
@@ -63,42 +84,6 @@ const INSUFFICIENT_SIGNING_PEERS_REASON = 'insufficient_signing_peers';
 const INSUFFICIENT_ECDH_PEERS_REASON = 'insufficient_ecdh_peers';
 const logger = createLogger('igloo.runtime');
 
-type RuntimeConfig = {
-  mode: 'onboarding' | 'persisted' | 'profile';
-  relays: string[];
-  signerSettings?: Partial<SignerSettings>;
-  onboardPackage?: string;
-  onboardPassword?: string;
-  bootstrapPeerPubkey32Hex?: string;
-  runtimeSnapshotJson?: string | null;
-  groupPackageJson?: string;
-  sharePackageJson?: string;
-};
-
-type RuntimeRestoreOptions = {
-  runtimeSnapshotJson?: string | null;
-};
-
-type OnboardingDecoded = {
-  share_secret: string;
-  share_pubkey32: string;
-  peer_pk_xonly: string;
-  relays: string[];
-};
-
-type OnboardingRequestBundleWire = {
-  request_id: string;
-  local_pubkey32: string;
-  request_nonces: unknown[];
-  bootstrap_state_hex: string;
-  event_json: string;
-};
-
-type OnboardingRequestResult = {
-  response: OnboardResponseWire;
-  bundle: OnboardingRequestBundleWire;
-};
-
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return await Promise.race([
     promise,
@@ -120,143 +105,6 @@ function canProceedWhileDegraded(kind: 'sign' | 'ecdh', degradedReasons: string[
 
   return degradedReasons.every((reason) => allowedReasons.has(reason));
 }
-
-export type DecodedOnboardingProfile = {
-  publicKey: string;
-  peerPubkey: string;
-  relays: string[];
-};
-
-export type RuntimePeerStatus = {
-  idx: number;
-  pubkey: string;
-  known: boolean;
-  last_seen: number | null;
-  online: boolean;
-  incoming_available: number;
-  outgoing_available: number;
-  outgoing_spent: number;
-  can_sign: boolean;
-  should_send_nonces: boolean;
-};
-
-export type RuntimeMetadata = {
-  device_id: string;
-  member_idx: number;
-  share_public_key: string;
-  group_public_key: string;
-  peers: string[];
-};
-
-export type PolicyOverrideValue = 'unset' | 'allow' | 'deny';
-
-export type RuntimeMethodPolicy = {
-  ping: boolean;
-  onboard: boolean;
-  sign: boolean;
-  ecdh: boolean;
-};
-
-export type RuntimeMethodPolicyOverride = {
-  ping: PolicyOverrideValue;
-  onboard: PolicyOverrideValue;
-  sign: PolicyOverrideValue;
-  ecdh: PolicyOverrideValue;
-};
-
-export type RuntimePeerPermissionState = {
-  pubkey: string;
-  manual_override: {
-    request: RuntimeMethodPolicyOverride;
-    respond: RuntimeMethodPolicyOverride;
-  };
-  remote_observation: {
-    request: RuntimeMethodPolicy;
-    respond: RuntimeMethodPolicy;
-    updated: number;
-    revision: number;
-  } | null;
-  effective_policy: {
-    request: RuntimeMethodPolicy;
-    respond: RuntimeMethodPolicy;
-  };
-};
-
-export type RuntimeReadiness = {
-  runtime_ready: boolean;
-  restore_complete: boolean;
-  sign_ready: boolean;
-  ecdh_ready: boolean;
-  threshold: number;
-  signing_peer_count: number;
-  ecdh_peer_count: number;
-  last_refresh_at: number | null;
-  degraded_reasons: string[];
-};
-
-export type RuntimeOperationReadiness = {
-  sign_initiator_ready: boolean;
-  sign_responder_ready: boolean;
-  ecdh_ready: boolean;
-  sign_initiator_peer_count: number;
-  sign_responder_peer_count: number;
-  ecdh_peer_count: number;
-  sign_initiator_peers: string[];
-  sign_responder_peers: string[];
-  ecdh_ready_peers: string[];
-  missing_sign_initiator_peers: string[];
-  missing_sign_responder_peers: string[];
-  missing_ecdh_peers: string[];
-};
-
-export type RuntimeReadinessExplanation = {
-  runtime_ready: boolean;
-  restore_complete: boolean;
-  sign_ready: boolean;
-  ecdh_ready: boolean;
-  threshold: number;
-  signing_peer_count: number;
-  ecdh_peer_count: number;
-  last_refresh_at: number | null;
-  degraded_reasons: string[];
-  operations: RuntimeOperationReadiness;
-};
-
-export type RuntimeStatusDetails = {
-  device_id: string;
-  pending_ops: number;
-  last_active: number;
-  known_peers: number;
-  request_seq: number;
-};
-
-export type RuntimePendingOperation = {
-  op_type: string;
-  request_id: string;
-  started_at: number;
-  timeout_at: number;
-  target_peers: string[];
-  threshold: number;
-  collected_responses: unknown[];
-  context: unknown;
-};
-
-export type RuntimeOnboardingStatus = {
-  pubkey: string;
-  stage: 'device_contacted_host' | 'handshake_completed' | 'failed';
-  updated_at: number;
-  error?: string | null;
-};
-
-export type RuntimeStatusSummary = {
-  status: RuntimeStatusDetails;
-  metadata: RuntimeMetadata;
-  readiness: RuntimeReadiness;
-  peers: RuntimePeerStatus[];
-  peer_permission_states: RuntimePeerPermissionState[];
-  onboarding_statuses?: RuntimeOnboardingStatus[];
-  pending_operations: RuntimePendingOperation[];
-};
 
 export function deriveReadinessExplanation(
   runtimeStatus: RuntimeStatusSummary
@@ -298,73 +146,6 @@ export function deriveReadinessExplanation(
     }
   };
 }
-
-export type RuntimeEvent = {
-  kind:
-    | 'initialized'
-    | 'status_changed'
-    | 'command_queued'
-    | 'inbound_accepted'
-    | 'config_updated'
-    | 'policy_updated'
-    | 'state_wiped';
-  status: RuntimeStatusSummary;
-};
-
-type GroupMemberWire = {
-  idx: number;
-  pubkey: string;
-};
-
-type GroupPackageWire = {
-  group_pk: string;
-  threshold: number;
-  members: GroupMemberWire[];
-};
-
-type RuntimeSnapshotWire = {
-  bootstrap: {
-    group: GroupPackageWire;
-    share: {
-      idx: number;
-      seckey: string;
-    };
-    peers: string[];
-  };
-  state_hex: string;
-};
-
-type RuntimeBootstrapWire = {
-  group: GroupPackageWire;
-  share: {
-    idx: number;
-    seckey: string;
-  };
-  peers: string[];
-  initial_peer_nonces?: Array<{
-    peer: string;
-    nonces: unknown[];
-  }>;
-};
-
-type ProfileBootstrapState = {
-  bootstrap: RuntimeBootstrapWire;
-  shareSecret: string;
-};
-
-type OnboardResponseWire = {
-  group: GroupPackageWire;
-  nonces: unknown[];
-};
-
-type BridgeEnvelope = {
-  request_id: string;
-  sent_at: number;
-  payload: {
-    type: string;
-    data: unknown;
-  };
-};
 
 export type ValidationResult = {
   isValid: boolean;
