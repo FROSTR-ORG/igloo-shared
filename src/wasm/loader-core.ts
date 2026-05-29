@@ -20,18 +20,6 @@ export async function loadConfiguredWasmModule<
   },
 ): Promise<TModule> {
   try {
-    console.warn(
-      JSON.stringify({
-        ts: Date.now(),
-        level: 'warn',
-        component: 'igloo.wasm-loader',
-        domain: input.domain,
-        event: 'load_module_begin',
-        has_preloaded_module: !!input.config.preloadedModule,
-        loader_import_url: input.config.loaderImportUrl ?? null,
-      }),
-    );
-
     const imported = (input.config.preloadedModule ??
       (input.config.loaderImportUrl
         ? ((await dynamicImportModule(input.config.loaderImportUrl)) as TLoaderModule)
