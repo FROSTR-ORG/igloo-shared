@@ -221,6 +221,19 @@ export type {
   ValidationResult,
 } from './runtime-api';
 
+// --- runtime projections (PR32, Bucket G.4) ---
+export {
+  countKnownPeers,
+  countOnlinePeers,
+  hasPendingSigns,
+  selectActivePeers,
+  selectNoncePoolCapacity,
+  selectOnboardingStatuses,
+  selectPeerPermissionStates,
+  selectPendingOperations,
+  selectReadinessExplanation,
+} from './runtime-projections';
+
 // --- browser-session-orchestration ---
 // `completeBrowserProfileSave`, `createRuntimeUnavailableWarning`,
 // `BrowserProfileSaveResult`, and `BrowserRuntimeWarning` are exported once
