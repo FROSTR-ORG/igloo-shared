@@ -112,12 +112,6 @@ export type PeerPolicy = {
   [key: string]: unknown;
 };
 
-export type NodeWithEvents = {
-  on: (event: string, handler: (...args: unknown[]) => void) => void;
-  off?: (event: string, handler: (...args: unknown[]) => void) => void;
-  removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
-};
-
 type PendingPing = {
   peer: string;
   startedAtMs: number;
@@ -125,7 +119,7 @@ type PendingPing = {
   resolve: (value: PingResult) => void;
 };
 
-export class BrowserBridgeNode implements NodeWithEvents {
+export class BrowserBridgeNode {
   private handlers = new Map<string, Set<(...args: unknown[]) => void>>();
   private pool: SimplePool | null = null;
   private relaySubscription: { close: (reason?: string) => void } | null = null;
@@ -1524,12 +1518,4 @@ export class BrowserBridgeNode implements NodeWithEvents {
         })
     );
   }
-}
-
-export function isBrowserBridgeNode(node: NodeWithEvents): node is BrowserBridgeNode {
-  return (
-    typeof (node as BrowserBridgeNode).connect === 'function' &&
-    typeof (node as BrowserBridgeNode).shutdown === 'function' &&
-    typeof (node as BrowserBridgeNode).fetchPeers === 'function'
-  );
 }

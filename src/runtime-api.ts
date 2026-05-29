@@ -1,4 +1,4 @@
-// Public runtime API — the free functions that operate on a NodeWithEvents.
+// Public runtime API — the free functions that operate on a BrowserBridgeNode.
 //
 // PR30: extracted verbatim from `browser-runtime-core.ts`. This module owns
 // the operator-facing free functions and re-exports the BrowserBridgeNode
@@ -18,8 +18,6 @@ import { normalizeRelays, DEFAULT_RELAYS } from './relay-transport';
 import type { SignerSettings } from './signer-settings';
 import {
   BrowserBridgeNode,
-  isBrowserBridgeNode,
-  type NodeWithEvents,
   type PeerPolicy,
   type PingResult,
   type ValidationResult
@@ -39,7 +37,7 @@ import type {
 
 // --- Re-exports so the package barrel surface stays unchanged ---
 export { BrowserBridgeNode } from './wasm-bridge-node';
-export type { NodeWithEvents, PeerPolicy, PingResult, ValidationResult } from './wasm-bridge-node';
+export type { PeerPolicy, PingResult, ValidationResult } from './wasm-bridge-node';
 export { DEFAULT_RELAYS, normalizeRelays } from './relay-transport';
 export {
   MAX_ONBOARDING_DECRYPTS,
@@ -166,34 +164,29 @@ export function validateOnboardCredential(value: string): ValidationResult {
 export function createSignerNode(
   config: RuntimeConfig,
   restoreOptions?: RuntimeRestoreOptions
-): NodeWithEvents {
+): BrowserBridgeNode {
   return new BrowserBridgeNode(config, restoreOptions);
 }
 
-export async function connectSignerNode(node: NodeWithEvents) {
-  if (!isBrowserBridgeNode(node)) {
-    throw new Error('Unsupported signer node implementation');
-  }
+export async function connectSignerNode(node: BrowserBridgeNode) {
   await node.connect();
 }
 
-export async function startSignerNode(config: RuntimeConfig) {
+export async function startSignerNode(config: RuntimeConfig): Promise<BrowserBridgeNode> {
   const node = createSignerNode(config);
   await connectSignerNode(node);
   return node;
 }
 
-export function stopSignerNode(node: NodeWithEvents | null) {
-  if (!node || !isBrowserBridgeNode(node)) return;
+export function stopSignerNode(node: BrowserBridgeNode | null) {
+  if (!node) return;
   void node.shutdown();
 }
 
 export async function refreshPeerStatuses(
-  node: NodeWithEvents,
+  node: BrowserBridgeNode,
   peers: PeerPolicy[]
 ): Promise<PeerPolicy[]> {
-  if (!isBrowserBridgeNode(node)) return peers;
-
   try {
     return await node.fetchPeers(peers);
   } catch (error) {
@@ -204,11 +197,7 @@ export async function refreshPeerStatuses(
   }
 }
 
-export async function pingSinglePeer(node: NodeWithEvents, pubkey: string): Promise<PingResult> {
-  if (!isBrowserBridgeNode(node)) {
-    return { success: false, error: 'Unsupported signer node implementation' };
-  }
-
+export async function pingSinglePeer(node: BrowserBridgeNode, pubkey: string): Promise<PingResult> {
   try {
     return await node.pingPeer(pubkey);
   } catch (error) {
@@ -220,16 +209,12 @@ export async function pingSinglePeer(node: NodeWithEvents, pubkey: string): Prom
 }
 
 export function detachEvent(
-  node: NodeWithEvents,
+  node: BrowserBridgeNode,
   event: string,
   handler: (...args: unknown[]) => void
 ) {
   try {
-    if (typeof node.off === 'function') {
-      node.off(event, handler);
-    } else if (typeof node.removeListener === 'function') {
-      node.removeListener(event, handler);
-    }
+    node.off(event, handler);
   } catch (error) {
     logger.warn('runtime', 'detach_listener_failed', {
       event_name: event,
@@ -239,42 +224,27 @@ export function detachEvent(
 }
 
 export async function signNostrEvent(
-  node: NodeWithEvents,
+  node: BrowserBridgeNode,
   event: Record<string, unknown>
 ): Promise<Event> {
-  if (!isBrowserBridgeNode(node) || typeof node.signNostrEvent !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
   return await node.signNostrEvent(event);
 }
 
-export function getPublicKeyFromNode(node: NodeWithEvents): string {
-  if (!isBrowserBridgeNode(node) || typeof node.getPublicKey !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export function getPublicKeyFromNode(node: BrowserBridgeNode): string {
   return node.getPublicKey();
 }
 
-export function getSharePublicKeyFromNode(node: NodeWithEvents): string {
-  if (!isBrowserBridgeNode(node) || typeof node.getSharePublicKey !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export function getSharePublicKeyFromNode(node: BrowserBridgeNode): string {
   return node.getSharePublicKey();
 }
 
-export function getRuntimeConfigFromNode(node: NodeWithEvents): SignerSettings {
-  if (!isBrowserBridgeNode(node) || typeof node.readConfig !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export function getRuntimeConfigFromNode(node: BrowserBridgeNode): SignerSettings {
   return node.readConfig();
 }
 
 export function getRuntimePeerPermissionStatesFromNode(
-  node: NodeWithEvents
+  node: BrowserBridgeNode
 ): RuntimePeerPermissionState[] {
-  if (!isBrowserBridgeNode(node) || typeof node.peerPermissionStates !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
   const states = JSON.parse(node.peerPermissionStates()) as RuntimePeerPermissionState[];
   return Array.isArray(states)
     ? [...states].sort((a, b) => a.pubkey.localeCompare(b.pubkey))
@@ -282,114 +252,72 @@ export function getRuntimePeerPermissionStatesFromNode(
 }
 
 export async function updateRuntimePeerPolicyOverrideOnNode(
-  node: NodeWithEvents,
+  node: BrowserBridgeNode,
   pubkey: string,
   patch: PeerPolicyOverridePatch
 ) {
-  if (!isBrowserBridgeNode(node) || typeof node.updatePeerPolicyOverride !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
   await node.updatePeerPolicyOverride(pubkey, patch);
 }
 
-export async function clearRuntimePeerPolicyOverridesOnNode(node: NodeWithEvents) {
-  if (!isBrowserBridgeNode(node) || typeof node.clearPeerPolicyOverrides !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export async function clearRuntimePeerPolicyOverridesOnNode(node: BrowserBridgeNode) {
   await node.clearPeerPolicyOverrides();
 }
 
 export function updateRuntimeConfigOnNode(
-  node: NodeWithEvents,
+  node: BrowserBridgeNode,
   settings: Partial<SignerSettings>
 ): void {
-  if (!isBrowserBridgeNode(node) || typeof node.updateConfig !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
   node.updateConfig(settings);
 }
 
-export function getRuntimeMetadata(node: NodeWithEvents): RuntimeMetadata {
-  if (!isBrowserBridgeNode(node) || typeof node.runtimeMetadata !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export function getRuntimeMetadata(node: BrowserBridgeNode): RuntimeMetadata {
   return node.runtimeMetadata();
 }
 
-export function getRuntimePeerStatus(node: NodeWithEvents): RuntimePeerStatus[] {
-  if (!isBrowserBridgeNode(node) || typeof node.runtimePeerStatus !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export function getRuntimePeerStatus(node: BrowserBridgeNode): RuntimePeerStatus[] {
   return node.runtimePeerStatus();
 }
 
-export function getRuntimeReadiness(node: NodeWithEvents): RuntimeReadiness {
-  if (!isBrowserBridgeNode(node) || typeof node.runtimeReadiness !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export function getRuntimeReadiness(node: BrowserBridgeNode): RuntimeReadiness {
   return node.runtimeReadiness();
 }
 
-export function refreshAllPeersOnNode(node: NodeWithEvents): void {
-  if (!isBrowserBridgeNode(node) || typeof node.refreshAllPeers !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export function refreshAllPeersOnNode(node: BrowserBridgeNode): void {
   node.refreshAllPeers();
 }
 
-export function wipeRuntimeStateOnNode(node: NodeWithEvents): void {
-  if (!isBrowserBridgeNode(node) || typeof node.wipeState !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export function wipeRuntimeStateOnNode(node: BrowserBridgeNode): void {
   node.wipeState();
 }
 
-export async function prepareSignOnNode(node: NodeWithEvents): Promise<RuntimeReadiness> {
-  if (!isBrowserBridgeNode(node) || typeof node.prepareSign !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export async function prepareSignOnNode(node: BrowserBridgeNode): Promise<RuntimeReadiness> {
   return await node.prepareSign();
 }
 
-export async function prepareEcdhOnNode(node: NodeWithEvents): Promise<RuntimeReadiness> {
-  if (!isBrowserBridgeNode(node) || typeof node.prepareEcdh !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export async function prepareEcdhOnNode(node: BrowserBridgeNode): Promise<RuntimeReadiness> {
   return await node.prepareEcdh();
 }
 
 export async function nip44EncryptWithNode(
-  node: NodeWithEvents,
+  node: BrowserBridgeNode,
   pubkey: string,
   plaintext: string
 ): Promise<string> {
-  if (!isBrowserBridgeNode(node) || typeof node.nip44Encrypt !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
   return await node.nip44Encrypt(pubkey, plaintext);
 }
 
 export async function nip44DecryptWithNode(
-  node: NodeWithEvents,
+  node: BrowserBridgeNode,
   pubkey: string,
   ciphertext: string
 ): Promise<string> {
-  if (!isBrowserBridgeNode(node) || typeof node.nip44Decrypt !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
   return await node.nip44Decrypt(pubkey, ciphertext);
 }
 
-export function getRuntimeSnapshot(node: NodeWithEvents): unknown {
-  if (!isBrowserBridgeNode(node) || typeof node.snapshotRuntimeState !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export function getRuntimeSnapshot(node: BrowserBridgeNode): unknown {
   return node.snapshotRuntimeState();
 }
 
-export function getRuntimeStatus(node: NodeWithEvents): RuntimeStatusSummary {
-  if (!isBrowserBridgeNode(node) || typeof node.runtimeStatus !== 'function') {
-    throw new Error('Unsupported signer node implementation');
-  }
+export function getRuntimeStatus(node: BrowserBridgeNode): RuntimeStatusSummary {
   return node.runtimeStatus();
 }

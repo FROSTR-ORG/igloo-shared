@@ -169,6 +169,7 @@ export type {
 
 // --- runtime-api (split out of browser-runtime-core in PR30) ---
 export {
+  BrowserBridgeNode,
   DEFAULT_RELAYS,
   MAX_ONBOARDING_DECRYPTS,
   clearRuntimePeerPolicyOverridesOnNode,
@@ -210,7 +211,6 @@ export {
 } from './runtime-api';
 export type {
   BridgeDispatchOutcome,
-  NodeWithEvents,
   OnboardingDecryptCounter,
   OnboardingGroupValidation,
   PeerPolicy,
