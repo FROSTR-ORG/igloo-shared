@@ -1,8 +1,6 @@
 import {
   importBrowserProfilePackage,
-  recoverBrowserProfilePackage,
   type BrowserImportedProfilePackage,
-  type BrowserRecoveredProfilePackage,
 } from '../browser-profile-recovery';
 import { createFinalizedBrowserStoredProfile } from '../browser-profile-store';
 import type { SignerSettings } from '../signer-settings';
@@ -62,69 +60,6 @@ export async function saveImportedBrowserProfileAndMaybeActivate<TProfile, TRunt
     persistProfile: async ({ finalized, password }) =>
       await args.persistProfile({
         imported,
-        finalized,
-        password,
-      }),
-    autoStart: args.autoStart,
-    activate: args.activate,
-    runtimeUnavailableMessage: args.runtimeUnavailableMessage,
-    onRuntimeUnavailable: args.onRuntimeUnavailable,
-  });
-}
-
-export async function saveRecoveredBrowserProfileAndMaybeActivate<TProfile, TRuntime>(args: {
-  packageText: string;
-  password: string;
-  existingProfileIds?: string[] | null;
-  signerSettings?: Partial<SignerSettings> | null;
-  peerPubkey?: string | null;
-  runtimeSnapshotJson?: string | null;
-  artifactNamespace?: string;
-  publishBackup?: boolean;
-  persistProfile: (input: {
-    recovered: BrowserRecoveredProfilePackage;
-    finalized: Awaited<ReturnType<typeof createFinalizedBrowserStoredProfile>>;
-    password: string;
-  }) => Promise<TProfile>;
-} & BrowserSaveActivateOptions<TRuntime>) {
-  let recovered: BrowserRecoveredProfilePackage;
-  try {
-    recovered = await recoverBrowserProfilePackage(args.packageText, args.password);
-  } catch (error) {
-    logSharedSaveFailure({ flowKind: 'bfshare', stage: 'decode', error });
-    throw error;
-  }
-
-  let finalized: Awaited<ReturnType<typeof createFinalizedBrowserStoredProfile>>;
-  try {
-    finalized = await createFinalizedBrowserStoredProfile({
-      payload: recovered.payload,
-      password: args.password,
-      source: recovered.source,
-      existingProfileIds: args.existingProfileIds,
-      profileString: recovered.profileString,
-      shareString: recovered.shareString,
-      signerSettings: args.signerSettings ?? null,
-      peerPubkey: args.peerPubkey ?? null,
-      runtimeSnapshotJson: args.runtimeSnapshotJson ?? null,
-      artifactNamespace: args.artifactNamespace,
-      publishBackup: args.publishBackup ?? false,
-    });
-  } catch (error) {
-    logSharedSaveFailure({
-      flowKind: recovered.source,
-      stage: 'finalize',
-      profileId: recovered.payload.profileId,
-      error,
-    });
-    throw error;
-  }
-
-  return await saveFinalizedBrowserProfileAndMaybeActivate({
-    finalized,
-    persistProfile: async ({ finalized, password }) =>
-      await args.persistProfile({
-        recovered,
         finalized,
         password,
       }),

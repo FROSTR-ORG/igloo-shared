@@ -8,11 +8,3 @@ export type BrowserImportedProfilePackage = {
   profileString: string;
   shareString: string;
 };
-
-export type BrowserRecoveredProfilePackage = {
-  source: 'bfshare';
-  payload: BrowserProfilePackagePayload;
-  preview: BrowserProfilePreview;
-  profileString: string;
-  shareString: string;
-};

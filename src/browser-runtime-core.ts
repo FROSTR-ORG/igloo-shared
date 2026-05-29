@@ -553,6 +553,13 @@ function parseEcdhCompletion(completion: unknown): { sharedSecretHex32: string }
   return { sharedSecretHex32: payload.shared_secret_hex32.toLowerCase() };
 }
 
+function parseOnboardServedCompletion(completion: unknown): { peerPubkey: string } | null {
+  if (!isRecord(completion)) return null;
+  const payload = completion.OnboardServed;
+  if (!isRecord(payload) || typeof payload.peer_pubkey32_hex !== 'string') return null;
+  return { peerPubkey: payload.peer_pubkey32_hex.toLowerCase() };
+}
+
 function parseOperationFailure(
   failure: unknown
 ): { opType: string; message: string } | null {
@@ -1768,6 +1775,14 @@ class BrowserBridgeNode implements NodeWithEvents {
             this.pendingCommand = null;
             clearPendingCommand(pending);
             pending.resolve(ecdh.sharedSecretHex32);
+          }
+
+          const onboardServed = parseOnboardServedCompletion(completion);
+          if (onboardServed) {
+            this.emitLog('info', 'onboarding', 'peer_onboarded', {
+              peer_pubkey: onboardServed.peerPubkey,
+            });
+            this.emit('onboard-complete', { peerPubkey: onboardServed.peerPubkey });
           }
 
         }

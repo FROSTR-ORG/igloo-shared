@@ -12,5 +12,6 @@ export * from './nip44-normalize';
 export * from './observability';
 export * from './profile-backup-host';
 export * from './profile-package';
+export * from './relay-ping';
 export * from './rotation';
 export * from './signer-settings';

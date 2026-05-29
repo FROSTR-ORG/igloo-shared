@@ -30,7 +30,6 @@ import {
   saveBrowserProfileAndMaybeActivate,
   saveConnectedBrowserProfileAndMaybeActivate,
   saveImportedBrowserProfileAndMaybeActivate,
-  saveRecoveredBrowserProfileAndMaybeActivate,
   saveRotatedBrowserProfileAndMaybeActivate,
 } from './browser-profile-save';
 import { publicKeyFromSecret } from './index';
@@ -87,45 +86,6 @@ describe('browser-profile-save helpers', () => {
       runtime: { active: true },
       runtimeWarning: null,
     });
-  });
-
-  test('recovers, finalizes, and returns a runtime warning when activation fails', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    recoverProfileFromSharePackage.mockResolvedValue({ profile: payload });
-
-    const saved = await saveRecoveredBrowserProfileAndMaybeActivate({
-      packageText: 'bfshare1test',
-      password: 'secret',
-      autoStart: true,
-      persistProfile: async ({ recovered, finalized }) => ({
-        id: recovered.payload.profileId,
-        source: finalized.source,
-      }),
-      activate: async () => {
-        throw new Error('runtime offline');
-      },
-    });
-
-    expect(saved.profile).toEqual({ id: 'profile-1', source: 'bfshare' });
-    expect(saved.runtime).toBeNull();
-    expect(saved.runtimeWarning).toEqual(
-      expect.objectContaining({
-        code: 'runtime_unavailable',
-        detail: 'runtime offline',
-      }),
-    );
-    const lastWarnCall = warnSpy.mock.calls[warnSpy.mock.calls.length - 1];
-    const event = JSON.parse(String(lastWarnCall?.[0] ?? '{}'));
-    expect(event).toEqual(
-      expect.objectContaining({
-        domain: 'profile',
-        event: 'activate_runtime_unavailable',
-        stage: 'activate',
-        warning_code: 'runtime_unavailable',
-        warning_detail: 'runtime offline',
-      }),
-    );
-    warnSpy.mockRestore();
   });
 
   test('finalizes and persists a connected onboarding profile', async () => {
