@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing/setup-dom": "./src/testing/setup-dom.ts",
+    "./testing/vitest-base": "./src/testing/vitest-base.ts"
   },
   "scripts": {
     "build:browser-wasm": "./scripts/build-bridge-wasm.sh",
