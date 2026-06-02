@@ -109,6 +109,13 @@ export type RuntimeOnboardingStatus = {
   error?: string | null;
 };
 
+/**
+ * The canonical hosted read model returned by `getRuntimeStatus()` /
+ * `node.runtimeStatus()`. Mirrors `bifrost_signer::RuntimeStatusSummary`
+ * (bifrost-rs is the source of truth) and is the single surface UIs should
+ * read for peers, readiness, permission states, and pending operations.
+ * Fields carry only public/scalar data — no secret material.
+ */
 export type RuntimeStatusSummary = {
   status: RuntimeStatusDetails;
   metadata: RuntimeMetadata;

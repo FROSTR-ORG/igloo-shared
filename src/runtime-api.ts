@@ -161,6 +161,15 @@ export function validateOnboardCredential(value: string): ValidationResult {
   return { isValid: true };
 }
 
+/**
+ * Construct a signer node from a runtime config. This does NOT touch WASM or
+ * relays — it only builds the node; all WASM/relay work happens in
+ * {@link connectSignerNode}. `config.mode` selects the bootstrap path
+ * (`onboarding` | `profile` | `persisted`); `restoreOptions.runtimeSnapshotJson`
+ * supplies the snapshot for `persisted` mode.
+ *
+ * @throws never (pure construction).
+ */
 export function createSignerNode(
   config: RuntimeConfig,
   restoreOptions?: RuntimeRestoreOptions
@@ -168,16 +177,28 @@ export function createSignerNode(
   return new BrowserBridgeNode(config, restoreOptions);
 }
 
+/**
+ * Bring a constructed node online: initialize the WASM bridge runtime, connect
+ * the configured relays, and bootstrap per `config.mode`. The WASM loader must
+ * be configured first (see `configureWasmBridgeLoader`) or this rejects with
+ * "WASM bridge loader is not configured"; it also rejects on "No connected
+ * relays available" or a runtime-init timeout.
+ */
 export async function connectSignerNode(node: BrowserBridgeNode) {
   await node.connect();
 }
 
+/** Convenience: {@link createSignerNode} followed by {@link connectSignerNode}. */
 export async function startSignerNode(config: RuntimeConfig): Promise<BrowserBridgeNode> {
   const node = createSignerNode(config);
   await connectSignerNode(node);
   return node;
 }
 
+/**
+ * Tear a node down: stops the tick loop, closes relay subscriptions and the
+ * pool, and rejects any in-flight commands with "Signer stopped". Null-safe.
+ */
 export function stopSignerNode(node: BrowserBridgeNode | null) {
   if (!node) return;
   void node.shutdown();
@@ -223,6 +244,11 @@ export function detachEvent(
   }
 }
 
+/**
+ * Threshold-sign a Nostr event and return the fully-signed event. Call
+ * {@link prepareSignOnNode} first to gate on signing readiness; this rejects if
+ * the threshold of signing peers is not met or the operation times out.
+ */
 export async function signNostrEvent(
   node: BrowserBridgeNode,
   event: Record<string, unknown>
@@ -278,6 +304,7 @@ export function getRuntimePeerStatus(node: BrowserBridgeNode): RuntimePeerStatus
   return node.runtimePeerStatus();
 }
 
+/** The readiness sub-view of {@link getRuntimeStatus} (sign/ecdh readiness, threshold, peer counts). */
 export function getRuntimeReadiness(node: BrowserBridgeNode): RuntimeReadiness {
   return node.runtimeReadiness();
 }
@@ -290,14 +317,25 @@ export function wipeRuntimeStateOnNode(node: BrowserBridgeNode): void {
   node.wipeState();
 }
 
+/**
+ * Refresh and return signing readiness before a sign. Hosted clients should
+ * gate {@link signNostrEvent} on this rather than inferring readiness from a
+ * snapshot. Rejects with `RuntimeReadinessTimeoutError` if readiness is not
+ * reached in time.
+ */
 export async function prepareSignOnNode(node: BrowserBridgeNode): Promise<RuntimeReadiness> {
   return await node.prepareSign();
 }
 
+/** Refresh and return ECDH readiness before an {@link nip44EncryptWithNode}/decrypt. */
 export async function prepareEcdhOnNode(node: BrowserBridgeNode): Promise<RuntimeReadiness> {
   return await node.prepareEcdh();
 }
 
+/**
+ * NIP-44 encrypt `plaintext` to `pubkey` using a threshold-ECDH conversation
+ * key. Gate on {@link prepareEcdhOnNode} first. Returns the NIP-44 payload.
+ */
 export async function nip44EncryptWithNode(
   node: BrowserBridgeNode,
   pubkey: string,
@@ -306,6 +344,7 @@ export async function nip44EncryptWithNode(
   return await node.nip44Encrypt(pubkey, plaintext);
 }
 
+/** NIP-44 decrypt `ciphertext` from `pubkey`; the inverse of {@link nip44EncryptWithNode}. */
 export async function nip44DecryptWithNode(
   node: BrowserBridgeNode,
   pubkey: string,
@@ -314,10 +353,20 @@ export async function nip44DecryptWithNode(
   return await node.nip44Decrypt(pubkey, ciphertext);
 }
 
+/**
+ * The opaque persistence/diagnostics snapshot of runtime state. Use this for
+ * saving state, NOT for readiness decisions — read those from
+ * {@link getRuntimeStatus} (the canonical hosted read model).
+ */
 export function getRuntimeSnapshot(node: BrowserBridgeNode): unknown {
   return node.snapshotRuntimeState();
 }
 
+/**
+ * The canonical hosted read model: peers, readiness, pending operations, and
+ * metadata as a typed {@link RuntimeStatusSummary}. This is the source of truth
+ * for UI and readiness gating. Throws "runtime not initialized" before connect.
+ */
 export function getRuntimeStatus(node: BrowserBridgeNode): RuntimeStatusSummary {
   return node.runtimeStatus();
 }
