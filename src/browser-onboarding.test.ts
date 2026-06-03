@@ -43,8 +43,8 @@ vi.mock('./profile-backup-host', () => ({
   publishEncryptedProfileBackup,
 }));
 
-vi.mock('./browser-runtime-session', async () => {
-  const actual = await vi.importActual<typeof import('./browser-runtime-session')>('./browser-runtime-session');
+vi.mock('./browser-profile/runtime-session', async () => {
+  const actual = await vi.importActual<typeof import('./browser-profile/runtime-session')>('./browser-profile/runtime-session');
   return {
     ...actual,
     runtimePayloadFromSnapshot,

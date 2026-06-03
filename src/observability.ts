@@ -1,3 +1,5 @@
+import { sanitizeDetails } from './observability-schema';
+
 export type ObservabilityLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export type ObservabilityEvent = {
@@ -37,50 +39,6 @@ const ACTIVE_LEVEL: ObservabilityLevel = DEBUG_ENABLED
 
 function shouldEmit(level: ObservabilityLevel) {
   return LOG_LEVEL_RANK[level] >= LOG_LEVEL_RANK[ACTIVE_LEVEL];
-}
-
-function sanitizeValue(value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return value;
-  if (Array.isArray(value)) return value.map(sanitizeValue);
-  if (typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
-        key,
-        redactField(key, entry)
-      ])
-    );
-  }
-  return String(value);
-}
-
-function redactField(key: string, value: unknown): unknown {
-  const normalized = key.toLowerCase();
-  if (
-    normalized.includes('password') ||
-    normalized.includes('onboardpackage') ||
-    normalized.includes('secret') ||
-    normalized.includes('seckey') ||
-    normalized.includes('nonce') ||
-    normalized === 'snapshot' ||
-    normalized === 'snapshotjson' ||
-    normalized === 'runtimesnapshotjson' ||
-    normalized === 'state_hex'
-  ) {
-    if (typeof value === 'string') {
-      return `[redacted:${normalized}:len=${value.length}]`;
-    }
-    return `[redacted:${normalized}]`;
-  }
-  return sanitizeValue(value);
-}
-
-function sanitizeDetails(detail?: Record<string, unknown>) {
-  if (!detail) return undefined;
-  return Object.fromEntries(
-    Object.entries(detail).map(([key, value]) => [key, redactField(key, value)])
-  );
 }
 
 function emitConsole(event: ObservabilityEvent) {
@@ -135,7 +93,7 @@ export function createObservabilityEvent(
     component,
     domain,
     event,
-    ...(sanitizeDetails(detail) ?? {})
+    ...sanitizeDetails(domain, event, detail)
   };
 }
 

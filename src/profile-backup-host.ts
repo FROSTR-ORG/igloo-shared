@@ -10,7 +10,7 @@ import {
   parseProfileBackupEvent,
   recoverProfileFromShareAndBackup,
 } from './profile-package';
-import { normalizeHex32, publicKeyFromSecret } from './browser-profile';
+import { normalizeHex32, publicKeyFromSecret } from './browser-profile/core';
 
 export type BrowserShareRecoveryResult = {
   share: BrowserSharePackagePayload;

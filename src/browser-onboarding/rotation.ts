@@ -1,7 +1,7 @@
 import {
   createFinalizedBrowserStoredProfile,
   reconstructBrowserProfilePackagePayload,
-} from '../browser-profile-store';
+} from '../browser-profile/store';
 import { groupPublicKeyFromPackage, type BrowserProfilePackagePayload } from '../profile-package';
 import { createConnectedBrowserProfilePayload } from './connect';
 import type { BrowserRotationProfileFinalizeArgs } from './types';

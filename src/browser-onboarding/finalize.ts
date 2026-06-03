@@ -1,4 +1,4 @@
-import { createFinalizedBrowserStoredProfile } from '../browser-profile-store';
+import { createFinalizedBrowserStoredProfile } from '../browser-profile/store';
 import { createConnectedBrowserProfilePayload } from './connect';
 import type { BrowserConnectedProfileFinalizeArgs } from './types';
 
