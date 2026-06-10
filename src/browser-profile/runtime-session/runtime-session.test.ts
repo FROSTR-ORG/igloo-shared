@@ -30,6 +30,20 @@ describe('browser-runtime-session helpers', () => {
     });
   });
 
+  test('createBrowserRuntimeNodeInit discards a corrupt snapshot and falls through to profile config', () => {
+    const init = createBrowserRuntimeNodeInit({
+      relays: ['ws://relay-3'],
+      signerSettings: { sign_timeout_secs: 14 },
+      // A truncated/corrupt snapshot must not reach the WASM restore path.
+      runtimeSnapshotJson: '{"state":"ok"', // missing closing brace
+      groupPackageJson: '{"group_name":"Group"}',
+      sharePackageJson: '{"idx":1,"seckey":"11"}',
+    });
+
+    expect(init.config.mode).toBe('profile');
+    expect(init.restoreOptions).toBeUndefined();
+  });
+
   test('createBrowserRuntimeNodeInit returns profile config when bootstrap packages are present', () => {
     const init = createBrowserRuntimeNodeInit({
       relays: ['ws://relay-2'],
