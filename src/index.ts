@@ -274,6 +274,7 @@ export type { ObservabilityEvent, ObservabilityLevel } from './observability';
 
 // --- profile-backup-host ---
 export {
+  __setProfileBackupPublishForTests,
   fetchLatestEncryptedProfileBackup,
   publishEncryptedProfileBackup,
   recoverProfileFromSharePackage,

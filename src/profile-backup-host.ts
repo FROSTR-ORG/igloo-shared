@@ -27,6 +27,21 @@ function normalizeRelays(relays: string[]) {
   return normalized;
 }
 
+let testPublishTransport: ((event: Event, relays: string[]) => void | Promise<void>) | null = null;
+
+/**
+ * Test-only seam. When set, {@link publishEncryptedProfileBackup} skips the real
+ * `SimplePool` relay publish (no network) and hands the built event to this hook
+ * instead. Browser unit tests use it so the create/import save flows don't open
+ * real relay WebSockets (which in jsdom resolve after teardown and surface a
+ * spurious undici unhandled error). Do not call from production code.
+ */
+export function __setProfileBackupPublishForTests(
+  fn: ((event: Event, relays: string[]) => void | Promise<void>) | null,
+) {
+  testPublishTransport = fn;
+}
+
 function closePool(pool: SimplePool, relays: string[]) {
   try {
     pool.close(relays);
@@ -54,6 +69,10 @@ export async function publishEncryptedProfileBackup(input: {
     input.backup,
     input.createdAt ?? null,
   );
+  if (testPublishTransport) {
+    await testPublishTransport(event, relays);
+    return event;
+  }
   const pool = new SimplePool();
   try {
     const results = await Promise.allSettled(
