@@ -44,8 +44,6 @@ export type WasmProfilePackageApi = {
   bfshare_prefix: () => string;
   bfonboard_prefix: () => string;
   bfprofile_prefix: () => string;
-  profile_backup_event_kind: () => number;
-  profile_backup_key_domain: () => string;
   encode_bfshare_package: (payloadJson: string, password: string) => string;
   decode_bfshare_package: (packageText: string, password: string) => string;
   encode_bfonboard_package: (payloadJson: string, password: string) => string;
@@ -55,17 +53,6 @@ export type WasmProfilePackageApi = {
   encode_bfprofile_package: (payloadJson: string, password: string) => string;
   decode_bfprofile_package: (packageText: string, password: string) => string;
   create_profile_package_pair: (payloadJson: string, password: string) => string;
-  create_encrypted_profile_backup: (profileJson: string) => string;
-  derive_profile_backup_conversation_key_hex: (shareSecret: string) => string;
-  encrypt_profile_backup_content: (backupJson: string, shareSecret: string) => string;
-  decrypt_profile_backup_content: (ciphertext: string, shareSecret: string) => string;
-  build_profile_backup_event: (
-    shareSecret: string,
-    backupJson: string,
-    createdAtSeconds?: number | null,
-  ) => string;
-  parse_profile_backup_event: (eventJson: string, shareSecret: string) => string;
-  recover_profile_from_share_and_backup: (shareJson: string, backupJson: string) => string;
 };
 
 export type WasmKeysetApi = {
@@ -134,8 +121,6 @@ export type WasmProfileModule = {
   bfshare_prefix: WasmProfilePackageApi['bfshare_prefix'];
   bfonboard_prefix: WasmProfilePackageApi['bfonboard_prefix'];
   bfprofile_prefix: WasmProfilePackageApi['bfprofile_prefix'];
-  profile_backup_event_kind: WasmProfilePackageApi['profile_backup_event_kind'];
-  profile_backup_key_domain: WasmProfilePackageApi['profile_backup_key_domain'];
   encode_bfshare_package: WasmProfilePackageApi['encode_bfshare_package'];
   decode_bfshare_package: WasmProfilePackageApi['decode_bfshare_package'];
   encode_bfonboard_package: WasmProfilePackageApi['encode_bfonboard_package'];
@@ -145,15 +130,6 @@ export type WasmProfileModule = {
   encode_bfprofile_package: WasmProfilePackageApi['encode_bfprofile_package'];
   decode_bfprofile_package: WasmProfilePackageApi['decode_bfprofile_package'];
   create_profile_package_pair: WasmProfilePackageApi['create_profile_package_pair'];
-  create_encrypted_profile_backup: WasmProfilePackageApi['create_encrypted_profile_backup'];
-  derive_profile_backup_conversation_key_hex:
-    WasmProfilePackageApi['derive_profile_backup_conversation_key_hex'];
-  encrypt_profile_backup_content: WasmProfilePackageApi['encrypt_profile_backup_content'];
-  decrypt_profile_backup_content: WasmProfilePackageApi['decrypt_profile_backup_content'];
-  build_profile_backup_event: WasmProfilePackageApi['build_profile_backup_event'];
-  parse_profile_backup_event: WasmProfilePackageApi['parse_profile_backup_event'];
-  recover_profile_from_share_and_backup:
-    WasmProfilePackageApi['recover_profile_from_share_and_backup'];
 };
 
 export type WasmProfileLoaderModule = WasmLoaderInitModule & {
@@ -161,8 +137,6 @@ export type WasmProfileLoaderModule = WasmLoaderInitModule & {
   bfshare_prefix?: WasmProfileModule['bfshare_prefix'];
   bfonboard_prefix?: WasmProfileModule['bfonboard_prefix'];
   bfprofile_prefix?: WasmProfileModule['bfprofile_prefix'];
-  profile_backup_event_kind?: WasmProfileModule['profile_backup_event_kind'];
-  profile_backup_key_domain?: WasmProfileModule['profile_backup_key_domain'];
   encode_bfshare_package?: WasmProfileModule['encode_bfshare_package'];
   decode_bfshare_package?: WasmProfileModule['decode_bfshare_package'];
   encode_bfonboard_package?: WasmProfileModule['encode_bfonboard_package'];
@@ -172,14 +146,6 @@ export type WasmProfileLoaderModule = WasmLoaderInitModule & {
   encode_bfprofile_package?: WasmProfileModule['encode_bfprofile_package'];
   decode_bfprofile_package?: WasmProfileModule['decode_bfprofile_package'];
   create_profile_package_pair?: WasmProfileModule['create_profile_package_pair'];
-  create_encrypted_profile_backup?: WasmProfileModule['create_encrypted_profile_backup'];
-  derive_profile_backup_conversation_key_hex?:
-    WasmProfileModule['derive_profile_backup_conversation_key_hex'];
-  encrypt_profile_backup_content?: WasmProfileModule['encrypt_profile_backup_content'];
-  decrypt_profile_backup_content?: WasmProfileModule['decrypt_profile_backup_content'];
-  build_profile_backup_event?: WasmProfileModule['build_profile_backup_event'];
-  parse_profile_backup_event?: WasmProfileModule['parse_profile_backup_event'];
-  recover_profile_from_share_and_backup?: WasmProfileModule['recover_profile_from_share_and_backup'];
 };
 
 export type AssertedWasmBridgeModule = WasmBridgeModule & Required<WasmBridgeLoaderModule>;

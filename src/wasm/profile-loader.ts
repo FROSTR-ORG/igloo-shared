@@ -18,8 +18,6 @@ function hasProfileExports(module: Partial<WasmProfileModule>): module is WasmPr
     module.bfshare_prefix &&
     module.bfonboard_prefix &&
     module.bfprofile_prefix &&
-    module.profile_backup_event_kind &&
-    module.profile_backup_key_domain &&
     module.encode_bfshare_package &&
     module.decode_bfshare_package &&
     module.encode_bfonboard_package &&
@@ -28,14 +26,7 @@ function hasProfileExports(module: Partial<WasmProfileModule>): module is WasmPr
     module.derive_profile_id_from_share_pubkey &&
     module.encode_bfprofile_package &&
     module.decode_bfprofile_package &&
-    module.create_profile_package_pair &&
-    module.create_encrypted_profile_backup &&
-    module.derive_profile_backup_conversation_key_hex &&
-    module.encrypt_profile_backup_content &&
-    module.decrypt_profile_backup_content &&
-    module.build_profile_backup_event &&
-    module.parse_profile_backup_event &&
-    module.recover_profile_from_share_and_backup
+    module.create_profile_package_pair
   );
 }
 
@@ -111,8 +102,6 @@ export async function getWasmProfilePackageApi(): Promise<WasmProfilePackageApi>
     bfshare_prefix: module.bfshare_prefix,
     bfonboard_prefix: module.bfonboard_prefix,
     bfprofile_prefix: module.bfprofile_prefix,
-    profile_backup_event_kind: module.profile_backup_event_kind,
-    profile_backup_key_domain: module.profile_backup_key_domain,
     encode_bfshare_package: module.encode_bfshare_package,
     decode_bfshare_package: module.decode_bfshare_package,
     encode_bfonboard_package: module.encode_bfonboard_package,
@@ -122,13 +111,5 @@ export async function getWasmProfilePackageApi(): Promise<WasmProfilePackageApi>
     encode_bfprofile_package: module.encode_bfprofile_package,
     decode_bfprofile_package: module.decode_bfprofile_package,
     create_profile_package_pair: module.create_profile_package_pair,
-    create_encrypted_profile_backup: module.create_encrypted_profile_backup,
-    derive_profile_backup_conversation_key_hex:
-      module.derive_profile_backup_conversation_key_hex,
-    encrypt_profile_backup_content: module.encrypt_profile_backup_content,
-    decrypt_profile_backup_content: module.decrypt_profile_backup_content,
-    build_profile_backup_event: module.build_profile_backup_event,
-    parse_profile_backup_event: module.parse_profile_backup_event,
-    recover_profile_from_share_and_backup: module.recover_profile_from_share_and_backup,
   };
 }
