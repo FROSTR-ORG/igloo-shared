@@ -5,7 +5,6 @@ import {
 } from '../../profile-package';
 import { DEFAULT_SIGNER_SETTINGS, type SignerSettings } from '../../signer-settings';
 import type { BrowserProfileSource } from '../core';
-import { publishBrowserProfileBackup } from './backup';
 import { assertBrowserProfileIdAvailable } from './duplicate';
 import type { BrowserPersistedProfileBundle } from './types';
 
@@ -19,7 +18,6 @@ export async function createBrowserPersistedProfileBundle(args: {
   peerPubkey?: string | null;
   runtimeSnapshotJson?: string | null;
   artifactNamespace?: string;
-  publishBackup?: boolean;
   existingProfileIds?: string[] | null;
 }): Promise<BrowserPersistedProfileBundle> {
   const projection = createBrowserStoredProfileProjection({
@@ -38,9 +36,6 @@ export async function createBrowserPersistedProfileBundle(args: {
   });
 
   const packagePair = await createProfilePackagePair(args.payload, args.password);
-  if (args.publishBackup !== false) {
-    await publishBrowserProfileBackup(args.payload);
-  }
 
   return {
     projection,

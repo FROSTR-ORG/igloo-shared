@@ -1,16 +1,10 @@
 import { describe, expect, test, vi } from 'vitest';
 
-const {
-  createProfilePackagePair,
-  createEncryptedProfileBackup,
-  publishEncryptedProfileBackup,
-} = vi.hoisted(() => ({
+const { createProfilePackagePair } = vi.hoisted(() => ({
   createProfilePackagePair: vi.fn(async () => ({
     profileString: 'bfprofile1saved',
     shareString: 'bfshare1saved',
   })),
-  createEncryptedProfileBackup: vi.fn(async () => ({ version: 1, device: { name: 'Saved Device' } })),
-  publishEncryptedProfileBackup: vi.fn(async () => ({ id: 'backup-event' })),
 }));
 
 vi.mock('../../profile-package', async () => {
@@ -18,13 +12,8 @@ vi.mock('../../profile-package', async () => {
   return {
     ...actual,
     createProfilePackagePair,
-    createEncryptedProfileBackup,
   };
 });
-
-vi.mock('../../profile-backup-host', () => ({
-  publishEncryptedProfileBackup,
-}));
 
 import {
   createBrowserPersistedProfileBundle,
@@ -33,7 +22,7 @@ import {
 } from '../../index';
 
 describe('browser-profile-persistence helpers', () => {
-  test('creates the persisted profile bundle and publishes the backup', async () => {
+  test('creates the persisted profile bundle', async () => {
     const payload = {
       profileId: 'profile-1',
       version: 1,
@@ -61,12 +50,6 @@ describe('browser-profile-persistence helpers', () => {
     expect(bundle.shareString).toBe('bfshare1saved');
     expect(bundle.projection.summary.id).toBe('profile-1');
     expect(createProfilePackagePair).toHaveBeenCalledWith(payload, 'secret');
-    expect(createEncryptedProfileBackup).toHaveBeenCalledWith(payload);
-    expect(publishEncryptedProfileBackup).toHaveBeenCalledWith({
-      relays: ['ws://relay-1'],
-      shareSecret: '11'.repeat(32),
-      backup: { version: 1, device: { name: 'Saved Device' } },
-    });
   });
 
   test('rejects duplicate profile ids before returning the bundle', async () => {
@@ -119,7 +102,6 @@ describe('browser-profile-persistence helpers', () => {
       payload,
       password: 'secret',
       source: 'bfprofile',
-      publishBackup: false,
     });
 
     expect(finalized).toEqual(

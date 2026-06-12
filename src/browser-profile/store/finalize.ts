@@ -41,7 +41,6 @@ export async function createFinalizedBrowserStoredProfile(args: {
   peerPubkey?: string | null;
   signerSettings?: Partial<SignerSettings> | null;
   artifactNamespace?: string;
-  publishBackup?: boolean;
 }): Promise<BrowserFinalizedStoredProfile> {
   const bundle = await createBrowserPersistedProfileBundle({
     payload: args.payload,
@@ -53,7 +52,6 @@ export async function createFinalizedBrowserStoredProfile(args: {
     peerPubkey: args.peerPubkey,
     runtimeSnapshotJson: args.runtimeSnapshotJson,
     artifactNamespace: args.artifactNamespace,
-    publishBackup: args.publishBackup,
     existingProfileIds: args.existingProfileIds,
   });
   const { preview, summary, artifactRefs, storedPayload } = bundle.projection;

@@ -1,17 +1,10 @@
 import { describe, expect, test, vi } from 'vitest';
 
-const {
-  createProfilePackagePair,
-  createEncryptedProfileBackup,
-  publishEncryptedProfileBackup,
-  runtimePayloadFromSnapshot,
-} = vi.hoisted(() => ({
+const { createProfilePackagePair, runtimePayloadFromSnapshot } = vi.hoisted(() => ({
   createProfilePackagePair: vi.fn(async () => ({
     profileString: 'bfprofile1connected',
     shareString: 'bfshare1connected',
   })),
-  createEncryptedProfileBackup: vi.fn(async () => ({ version: 1 })),
-  publishEncryptedProfileBackup: vi.fn(async () => ({ id: 'backup-event' })),
   runtimePayloadFromSnapshot: vi.fn(async () => ({
     profileId: 'connected-profile',
     version: 1,
@@ -35,13 +28,8 @@ vi.mock('./profile-package', async () => {
   return {
     ...actual,
     createProfilePackagePair,
-    createEncryptedProfileBackup,
   };
 });
-
-vi.mock('./profile-backup-host', () => ({
-  publishEncryptedProfileBackup,
-}));
 
 vi.mock('./browser-profile/runtime-session', async () => {
   const actual = await vi.importActual<typeof import('./browser-profile/runtime-session')>('./browser-profile/runtime-session');

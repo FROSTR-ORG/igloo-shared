@@ -111,7 +111,6 @@ export {
   assertBrowserProfileIdAvailable,
   createBrowserPersistedProfileBundle,
   duplicateBrowserProfileMessage,
-  publishBrowserProfileBackup,
 } from './browser-profile/persistence';
 export type {
   BrowserDuplicateProfileInput,
@@ -272,39 +271,23 @@ export {
 } from './observability';
 export type { ObservabilityEvent, ObservabilityLevel } from './observability';
 
-// --- profile-backup-host ---
-export {
-  __setProfileBackupPublishForTests,
-  fetchLatestEncryptedProfileBackup,
-  publishEncryptedProfileBackup,
-  recoverProfileFromSharePackage,
-} from './profile-backup-host';
-export type { BrowserShareRecoveryResult } from './profile-backup-host';
-
 // --- profile-package ---
 export {
-  buildProfileBackupEvent,
   buildProfileDownloadFilename,
-  createEncryptedProfileBackup,
   createProfilePackagePair,
   decodeBfOnboardPackage,
   decodeBfProfilePackage,
   decodeBfSharePackage,
-  decryptProfileBackupContent,
-  deriveProfileBackupConversationKey,
   deriveProfileIdFromSharePublicKey,
   deriveProfileIdFromShareSecret,
   encodeBfOnboardPackage,
   encodeBfProfilePackage,
   encodeBfSharePackage,
-  encryptProfileBackupContent,
-  getProfileBackupEventKind,
   groupNameFromPackage,
+  groupPackageFromWireJson,
   groupPackageToWireJson,
   groupPackageToWireValue,
   groupPublicKeyFromPackage,
-  parseProfileBackupEvent,
-  recoverProfileFromShareAndBackup,
   sharePackageToWireJson,
   sharePackageToWireValue,
   shortProfileId,
@@ -312,7 +295,6 @@ export {
   xOnlyFromCompressedPubkey,
 } from './profile-package';
 export type {
-  BrowserEncryptedProfileBackup,
   BrowserGroupPackage,
   BrowserGroupPackageMember,
   BrowserManualPeerPolicyOverride,
@@ -333,18 +315,12 @@ export type { RelayPingResult } from './relay-ping';
 export {
   buildRotationDistributionArtifact,
   buildRotationDraft,
-  buildRotationDraftFromBfshares,
   buildRotationProfilePayload,
-  deriveGroupIdFromProfilePayload,
-  fetchRotationBackupEvent,
-  publishRotationDistributionBackup,
-  recoverRotationSourceFromBfshare,
   recoverSecretKeyFromShares,
 } from './rotation';
 export type {
   BrowserRecoveredKey,
   BrowserRotationDraft,
-  BrowserRotationRecoveredSource,
   RotationDistributionArtifact,
   RotationTargetAssignment,
 } from './rotation';

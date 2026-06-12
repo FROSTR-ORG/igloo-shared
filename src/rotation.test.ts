@@ -1,36 +1,36 @@
 import { describe, expect, it } from 'vitest';
 
-import { recoverSecretKeyFromShares, type BrowserRotationRecoveredSource } from './rotation';
+import { publicKeyFromSecret } from './browser-profile/core';
+import type { BrowserGroupPackage } from './profile-package';
+import { recoverSecretKeyFromShares } from './rotation';
 
-// Minimal partial fixture: the recovery guards (empty / below-threshold / mismatched
-// group) all throw before any wasm call, so only groupId + threshold are needed.
-function source(groupId: string, threshold: number): BrowserRotationRecoveredSource {
+const secretA = '11'.repeat(32);
+const secretB = '22'.repeat(32);
+
+// The recovery guards (below-threshold / wrong-keyset) throw before any wasm call,
+// so a group package with members keyed off real share pubkeys is enough.
+function group(threshold: number, memberSecrets: string[]): BrowserGroupPackage {
   return {
-    groupId,
-    profile: {
-      groupPackage: { groupName: 'Group', groupPk: groupId, threshold, members: [] },
-    },
-  } as unknown as BrowserRotationRecoveredSource;
+    groupName: 'Group',
+    groupPk: `02${publicKeyFromSecret(secretA)}`,
+    threshold,
+    members: memberSecrets.map((secret, index) => ({
+      idx: index + 1,
+      pubkey: `02${publicKeyFromSecret(secret)}`,
+    })),
+  };
 }
 
 describe('recoverSecretKeyFromShares validation guards', () => {
-  it('rejects an empty source set', async () => {
-    await expect(recoverSecretKeyFromShares({ sources: [] })).rejects.toThrow(
-      /at least one share/i,
-    );
-  });
-
-  it('rejects fewer shares than the threshold', async () => {
+  it('rejects fewer distinct shares than the threshold', async () => {
     await expect(
-      recoverSecretKeyFromShares({ sources: [source('group-a', 2)] }),
+      recoverSecretKeyFromShares({ groupPackage: group(2, [secretA, secretB]), shareSecrets: [secretA] }),
     ).rejects.toThrow(/at least 2 shares/i);
   });
 
-  it('rejects sources from different groups', async () => {
+  it('rejects a share that does not belong to the keyset', async () => {
     await expect(
-      recoverSecretKeyFromShares({
-        sources: [source('group-a', 2), source('group-b', 2)],
-      }),
-    ).rejects.toThrow(/same group/i);
+      recoverSecretKeyFromShares({ groupPackage: group(2, [secretA]), shareSecrets: [secretB] }),
+    ).rejects.toThrow(/does not belong/i);
   });
 });

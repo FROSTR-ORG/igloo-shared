@@ -1,5 +1,3 @@
-import type { Event } from 'nostr-tools';
-
 import { getWasmProfilePackageApi } from './bridge-wasm-runtime';
 
 export type BrowserProtectedPackageKind = 'bfprofile' | 'bfshare' | 'bfonboard';
@@ -80,33 +78,10 @@ export function buildProfileDownloadFilename(
   return `${stem || 'profile'}-${shortId}.${extension}`;
 }
 
-export type BrowserEncryptedProfileBackup = {
-  version: number;
-  device: {
-    name: string;
-    sharePublicKey: string;
-    manualPeerPolicyOverrides: BrowserManualPeerPolicyOverride[];
-    relays: string[];
-  };
-  groupPackage: BrowserGroupPackage;
-};
-
 type BrowserProfilePackagePair = {
   profileString: string;
   shareString: string;
 };
-
-function hexToBytes(hex: string) {
-  const normalized = hex.trim().toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(normalized)) {
-    throw new Error('Invalid share secret.');
-  }
-  const bytes = new Uint8Array(normalized.length / 2);
-  for (let index = 0; index < bytes.length; index += 1) {
-    bytes[index] = Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16);
-  }
-  return bytes;
-}
 
 function parseJson<T>(value: string, label: string): T {
   try {
@@ -114,11 +89,6 @@ function parseJson<T>(value: string, label: string): T {
   } catch {
     throw new Error(`Invalid ${label}.`);
   }
-}
-
-export async function getProfileBackupEventKind() {
-  const api = await getWasmProfilePackageApi();
-  return api.profile_backup_event_kind();
 }
 
 export async function deriveProfileIdFromShareSecret(shareSecret: string) {
@@ -182,12 +152,39 @@ export function sharePackageToWireJson(memberIdx: number, shareSecret: string) {
   return JSON.stringify(sharePackageToWireValue(memberIdx, shareSecret), null, 2);
 }
 
-export async function createEncryptedProfileBackup(profile: BrowserProfilePackagePayload) {
-  const api = await getWasmProfilePackageApi();
-  return parseJson<BrowserEncryptedProfileBackup>(
-    api.create_encrypted_profile_backup(JSON.stringify(profile)),
-    'encrypted profile backup',
-  );
+/**
+ * Parse a stored group-package wire JSON (the snake_case shape produced by
+ * {@link groupPackageToWireJson}, persisted on profiles as `group_package_json`)
+ * back into a {@link BrowserGroupPackage}. Used by recovery/rotation to recover
+ * the group context locally instead of fetching it from a relay.
+ */
+export function groupPackageFromWireJson(json: string): BrowserGroupPackage {
+  const wire = parseJson<{
+    group_name?: unknown;
+    group_pk?: unknown;
+    threshold?: unknown;
+    members?: unknown;
+  }>(json, 'group package');
+  if (
+    typeof wire.group_name !== 'string' ||
+    typeof wire.group_pk !== 'string' ||
+    typeof wire.threshold !== 'number' ||
+    !Array.isArray(wire.members)
+  ) {
+    throw new Error('Invalid group package.');
+  }
+  return {
+    groupName: wire.group_name,
+    groupPk: wire.group_pk,
+    threshold: wire.threshold,
+    members: wire.members.map((member) => {
+      const entry = member as { idx?: unknown; pubkey?: unknown };
+      if (typeof entry.idx !== 'number' || typeof entry.pubkey !== 'string') {
+        throw new Error('Invalid group package member.');
+      }
+      return { idx: entry.idx, pubkey: entry.pubkey };
+    }),
+  };
 }
 
 export async function encodeBfSharePackage(payload: BrowserSharePackagePayload, password: string) {
@@ -234,55 +231,5 @@ export async function createProfilePackagePair(payload: BrowserProfilePackagePay
   return parseJson<BrowserProfilePackagePair>(
     api.create_profile_package_pair(JSON.stringify(payload), password),
     'profile package pair',
-  );
-}
-
-export async function deriveProfileBackupConversationKey(shareSecret: string) {
-  const api = await getWasmProfilePackageApi();
-  const hex = api.derive_profile_backup_conversation_key_hex(shareSecret);
-  return hexToBytes(hex);
-}
-
-export async function encryptProfileBackupContent(backup: BrowserEncryptedProfileBackup, shareSecret: string) {
-  const api = await getWasmProfilePackageApi();
-  return api.encrypt_profile_backup_content(JSON.stringify(backup), shareSecret);
-}
-
-export async function decryptProfileBackupContent(ciphertext: string, shareSecret: string) {
-  const api = await getWasmProfilePackageApi();
-  return parseJson<BrowserEncryptedProfileBackup>(
-    api.decrypt_profile_backup_content(ciphertext, shareSecret),
-    'encrypted profile backup',
-  );
-}
-
-export async function buildProfileBackupEvent(
-  shareSecret: string,
-  backup: BrowserEncryptedProfileBackup,
-  createdAt?: number | null,
-) {
-  const api = await getWasmProfilePackageApi();
-  return parseJson<Event>(
-    api.build_profile_backup_event(shareSecret, JSON.stringify(backup), createdAt ?? null),
-    'profile backup event',
-  );
-}
-
-export async function parseProfileBackupEvent(event: Event, shareSecret: string) {
-  const api = await getWasmProfilePackageApi();
-  return parseJson<BrowserEncryptedProfileBackup>(
-    api.parse_profile_backup_event(JSON.stringify(event), shareSecret),
-    'encrypted profile backup',
-  );
-}
-
-export async function recoverProfileFromShareAndBackup(
-  share: BrowserSharePackagePayload,
-  backup: BrowserEncryptedProfileBackup,
-) {
-  const api = await getWasmProfilePackageApi();
-  return parseJson<BrowserProfilePackagePayload>(
-    api.recover_profile_from_share_and_backup(JSON.stringify(share), JSON.stringify(backup)),
-    'recovered profile payload',
   );
 }

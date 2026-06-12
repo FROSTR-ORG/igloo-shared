@@ -1,28 +1,20 @@
-import type { Event } from 'nostr-tools';
 import { nip19 } from 'nostr-tools';
 
 import { getWasmKeysetApi } from './bridge-wasm-runtime';
 import {
-  groupJsonFromPayload,
   normalizeHex32,
   publicKeyFromSecret,
-  shareJsonFromPayload,
+  shareWireFromSecret,
 } from './browser-profile/core';
 import {
-  createEncryptedProfileBackup,
   deriveProfileIdFromShareSecret,
   encodeBfOnboardPackage,
-  type BrowserOnboardPackagePayload,
+  groupPackageToWireValue,
   groupPublicKeyFromPackage,
+  type BrowserGroupPackage,
+  type BrowserOnboardPackagePayload,
   type BrowserProfilePackagePayload,
-  type BrowserSharePackagePayload,
 } from './profile-package';
-import {
-  fetchLatestEncryptedProfileBackup,
-  publishEncryptedProfileBackup,
-  recoverProfileFromSharePackage,
-  type BrowserShareRecoveryResult,
-} from './profile-backup-host';
 
 type RotatedKeysetBundleExport = {
   previous_group_id: string;
@@ -35,11 +27,6 @@ type RotatedKeysetBundleExport = {
     };
     shares: Array<{ idx: number; seckey: string }>;
   };
-};
-
-export type BrowserRotationRecoveredSource = BrowserShareRecoveryResult & {
-  groupId: string;
-  sharePublicKey: string;
 };
 
 export type BrowserRotationDraft = {
@@ -55,7 +42,6 @@ export type BrowserRotationDraft = {
     shareSecret: string;
     sharePublicKey: string;
   }>;
-  sourceProfiles: BrowserRotationRecoveredSource[];
 };
 
 export type RotationTargetAssignment = {
@@ -81,59 +67,50 @@ function normalizeRelays(relays: string[]) {
   return normalized;
 }
 
-export async function deriveGroupIdFromProfilePayload(profile: BrowserProfilePackagePayload) {
-  const api = await getWasmKeysetApi();
-  return api.derive_group_id(groupJsonFromPayload(profile));
-}
-
-export async function recoverRotationSourceFromBfshare(
-  packageText: string,
-  password: string,
-  options?: { maxWait?: number },
-) {
-  const recovered = await recoverProfileFromSharePackage(packageText, password, options);
-  return {
-    ...recovered,
-    groupId: await deriveGroupIdFromProfilePayload(recovered.profile),
-    sharePublicKey: publicKeyFromSecret(recovered.share.shareSecret),
-  } satisfies BrowserRotationRecoveredSource;
+/**
+ * Map raw share secrets to their `{ idx, seckey }` wire shares within a known
+ * group package, deduped by member index. Each secret must belong to the group
+ * (otherwise {@link shareWireFromSecret} throws). This is the local replacement
+ * for the removed relay-backup fetch: the group context comes from the caller's
+ * own profile, not from a relay-published encrypted backup.
+ */
+function buildDistinctShareWires(groupPackage: BrowserGroupPackage, shareSecrets: string[]) {
+  const byIdx = new Map<number, { idx: number; seckey: string }>();
+  for (const secret of shareSecrets) {
+    const wire = shareWireFromSecret(groupPackage, secret);
+    byIdx.set(wire.idx, wire);
+  }
+  return [...byIdx.values()];
 }
 
 export async function buildRotationDraft(input: {
-  sources: BrowserRotationRecoveredSource[];
+  groupPackage: BrowserGroupPackage;
+  shareSecrets: string[];
   threshold: number;
   count: number;
   groupName?: string | null;
 }) {
-  if (input.sources.length === 0) {
-    throw new Error('At least one rotation source is required.');
-  }
-  const [first, ...rest] = input.sources;
-  if (input.sources.length < first.profile.groupPackage.threshold) {
-    throw new Error(`Rotation requires at least ${first.profile.groupPackage.threshold} current shares.`);
-  }
-  for (const source of rest) {
-    if (source.groupId !== first.groupId) {
-      throw new Error('Rotation sources must all belong to the same current group configuration.');
-    }
-    if (groupPublicKeyFromPackage(source.profile.groupPackage) !== groupPublicKeyFromPackage(first.profile.groupPackage)) {
-      throw new Error('Rotation sources must all belong to the same group public key.');
-    }
+  const shares = buildDistinctShareWires(input.groupPackage, input.shareSecrets);
+  if (shares.length < input.groupPackage.threshold) {
+    throw new Error(`Rotation requires at least ${input.groupPackage.threshold} current shares.`);
   }
 
   const api = await getWasmKeysetApi();
   const rotated = JSON.parse(
     api.rotate_keyset_bundle(
       JSON.stringify({
-        group: JSON.parse(groupJsonFromPayload(first.profile)),
-        shares: input.sources.map((source) => JSON.parse(shareJsonFromPayload(source.profile))),
+        group: groupPackageToWireValue(input.groupPackage),
+        shares,
         threshold: input.threshold,
         count: input.count,
       }),
     ),
   ) as RotatedKeysetBundleExport;
 
-  if (normalizeHex32(rotated.next.group.group_pk, 'rotated group public key') !== groupPublicKeyFromPackage(first.profile.groupPackage)) {
+  if (
+    normalizeHex32(rotated.next.group.group_pk, 'rotated group public key') !==
+    groupPublicKeyFromPackage(input.groupPackage)
+  ) {
     throw new Error('Rotation changed the group public key.');
   }
 
@@ -148,16 +125,13 @@ export async function buildRotationDraft(input: {
     groupPublicKey: normalizeHex32(rotated.next.group.group_pk, 'group public key'),
     threshold: rotated.next.group.threshold,
     count: rotated.next.group.members.length,
-    groupName: input.groupName?.trim() || first.profile.groupPackage.groupName,
+    groupName: input.groupName?.trim() || input.groupPackage.groupName,
     members,
-    shares: await Promise.all(
-      rotated.next.shares.map(async (share) => ({
-        memberIndex: share.idx,
-        shareSecret: normalizeHex32(share.seckey, 'rotated share secret'),
-        sharePublicKey: publicKeyFromSecret(share.seckey),
-      })),
-    ),
-    sourceProfiles: input.sources,
+    shares: rotated.next.shares.map((share) => ({
+      memberIndex: share.idx,
+      shareSecret: normalizeHex32(share.seckey, 'rotated share secret'),
+      sharePublicKey: publicKeyFromSecret(share.seckey),
+    })),
   } satisfies BrowserRotationDraft;
 }
 
@@ -167,40 +141,26 @@ export type BrowserRecoveredKey = {
 };
 
 /**
- * Reconstruct the group secret key (nsec) from a set of recovered shares.
- * Mirrors {@link buildRotationDraft}'s collection/validation, but instead of
- * re-sharing the keyset it returns the reconstructed private key for display.
- * The shares are never persisted; callers own auto-clearing the result.
+ * Reconstruct the group secret key (nsec) from a set of share secrets and the
+ * keyset's group package. Mirrors {@link buildRotationDraft}'s collection, but
+ * instead of re-sharing the keyset it returns the reconstructed private key for
+ * display. The shares are never persisted; callers own auto-clearing the result.
  */
 export async function recoverSecretKeyFromShares(input: {
-  sources: BrowserRotationRecoveredSource[];
+  groupPackage: BrowserGroupPackage;
+  shareSecrets: string[];
 }): Promise<BrowserRecoveredKey> {
-  if (input.sources.length === 0) {
-    throw new Error('At least one share is required to recover the key.');
-  }
-  const [first, ...rest] = input.sources;
-  const threshold = first.profile.groupPackage.threshold;
-  if (input.sources.length < threshold) {
-    throw new Error(`Recovery requires at least ${threshold} shares.`);
-  }
-  for (const source of rest) {
-    if (source.groupId !== first.groupId) {
-      throw new Error('Recovery sources must all belong to the same group configuration.');
-    }
-    if (
-      groupPublicKeyFromPackage(source.profile.groupPackage) !==
-      groupPublicKeyFromPackage(first.profile.groupPackage)
-    ) {
-      throw new Error('Recovery sources must all belong to the same group public key.');
-    }
+  const shares = buildDistinctShareWires(input.groupPackage, input.shareSecrets);
+  if (shares.length < input.groupPackage.threshold) {
+    throw new Error(`Recovery requires at least ${input.groupPackage.threshold} shares.`);
   }
 
   const api = await getWasmKeysetApi();
   const signingKeyHex = normalizeHex32(
     api.recover_secret_key_from_shares(
       JSON.stringify({
-        group: JSON.parse(groupJsonFromPayload(first.profile)),
-        shares: input.sources.map((source) => JSON.parse(shareJsonFromPayload(source.profile))),
+        group: groupPackageToWireValue(input.groupPackage),
+        shares,
       }),
     ),
     'recovered signing key',
@@ -209,31 +169,6 @@ export async function recoverSecretKeyFromShares(input: {
     (signingKeyHex.match(/.{2}/g) ?? []).map((byte) => Number.parseInt(byte, 16)),
   );
   return { nsec: nip19.nsecEncode(bytes), signingKeyHex };
-}
-
-export async function buildRotationDraftFromBfshares(input: {
-  sources: Array<{
-    packageText: string;
-    password: string;
-  }>;
-  threshold: number;
-  count: number;
-  groupName?: string | null;
-  maxWait?: number;
-}) {
-  const recoveredSources = await Promise.all(
-    input.sources.map((source) =>
-      recoverRotationSourceFromBfshare(source.packageText, source.password, {
-        maxWait: input.maxWait,
-      }),
-    ),
-  );
-  return await buildRotationDraft({
-    sources: recoveredSources,
-    threshold: input.threshold,
-    count: input.count,
-    groupName: input.groupName,
-  });
 }
 
 export async function buildRotationProfilePayload(
@@ -286,25 +221,4 @@ export async function buildRotationDistributionArtifact(input: {
     profilePayload: payload,
     onboardPackageText,
   } satisfies RotationDistributionArtifact;
-}
-
-export async function publishRotationDistributionBackup(payload: BrowserProfilePackagePayload) {
-  const backup = await createEncryptedProfileBackup(payload);
-  await publishEncryptedProfileBackup({
-    relays: payload.device.relays,
-    shareSecret: payload.device.shareSecret,
-    backup,
-  });
-}
-
-export async function fetchRotationBackupEvent(input: {
-  share: BrowserSharePackagePayload;
-  maxWait?: number;
-}): Promise<{ event: Event }> {
-  const { event } = await fetchLatestEncryptedProfileBackup({
-    relays: input.share.relays,
-    shareSecret: input.share.shareSecret,
-    maxWait: input.maxWait,
-  });
-  return { event };
 }

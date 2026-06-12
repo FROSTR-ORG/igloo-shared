@@ -15,7 +15,6 @@ export async function saveImportedBrowserProfileAndMaybeActivate<TProfile, TRunt
   peerPubkey?: string | null;
   runtimeSnapshotJson?: string | null;
   artifactNamespace?: string;
-  publishBackup?: boolean;
   persistProfile: (input: {
     imported: BrowserImportedProfilePackage;
     finalized: Awaited<ReturnType<typeof createFinalizedBrowserStoredProfile>>;
@@ -43,7 +42,6 @@ export async function saveImportedBrowserProfileAndMaybeActivate<TProfile, TRunt
       peerPubkey: args.peerPubkey ?? null,
       runtimeSnapshotJson: args.runtimeSnapshotJson ?? null,
       artifactNamespace: args.artifactNamespace,
-      publishBackup: args.publishBackup ?? false,
     });
   } catch (error) {
     logSharedSaveFailure({

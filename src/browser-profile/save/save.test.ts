@@ -1,16 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
 
-const {
-  createProfilePackagePair,
-  decodeBfProfilePackage,
-  recoverProfileFromSharePackage,
-} = vi.hoisted(() => ({
+const { createProfilePackagePair, decodeBfProfilePackage } = vi.hoisted(() => ({
   createProfilePackagePair: vi.fn(async () => ({
     profileString: 'bfprofile1saved',
     shareString: 'bfshare1saved',
   })),
   decodeBfProfilePackage: vi.fn(async () => ({} as any)),
-  recoverProfileFromSharePackage: vi.fn(async () => ({ profile: {} as any })),
 }));
 
 vi.mock('../../profile-package', async () => {
@@ -21,10 +16,6 @@ vi.mock('../../profile-package', async () => {
     decodeBfProfilePackage,
   };
 });
-
-vi.mock('../../profile-backup-host', () => ({
-  recoverProfileFromSharePackage,
-}));
 
 import {
   saveBrowserProfileAndMaybeActivate,

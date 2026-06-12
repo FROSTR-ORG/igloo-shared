@@ -2,6 +2,7 @@ import {
   groupPackageToWireJson,
   groupPublicKeyFromPackage,
   xOnlyFromCompressedPubkey,
+  type BrowserGroupPackage,
   type BrowserProfilePackagePayload,
 } from '../../profile-package';
 import { publicKeyFromSecret } from './keys';
@@ -9,6 +10,25 @@ import type { BrowserProfilePreview, BrowserProfileSource } from './types';
 
 export function groupJsonFromPayload(payload: BrowserProfilePackagePayload) {
   return groupPackageToWireJson(payload.groupPackage);
+}
+
+/**
+ * Map a raw share secret to its `{ idx, seckey }` wire share within a known
+ * group package, by matching the share's derived public key against the group
+ * members. Unlike {@link shareJsonFromPayload} (which falls back to the first
+ * member for an already-trusted local share), this THROWS when the secret is
+ * not a member of the group — so a wrong-keyset paste during recovery/rotation
+ * fails loudly instead of silently mis-indexing.
+ */
+export function shareWireFromSecret(groupPackage: BrowserGroupPackage, shareSecret: string) {
+  const sharePublicKey = publicKeyFromSecret(shareSecret);
+  const member = groupPackage.members.find(
+    (candidate) => xOnlyFromCompressedPubkey(candidate.pubkey) === sharePublicKey,
+  );
+  if (!member) {
+    throw new Error('This share does not belong to the selected keyset.');
+  }
+  return { idx: member.idx, seckey: shareSecret };
 }
 
 export function shareJsonFromPayload(payload: BrowserProfilePackagePayload) {

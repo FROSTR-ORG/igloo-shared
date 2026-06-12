@@ -22,7 +22,6 @@ export async function saveConnectedBrowserProfileAndMaybeActivate<TProfile, TRun
   runtimeSnapshotJson?: string | null;
   onboardingPackage?: string | null;
   artifactNamespace?: string;
-  publishBackup?: boolean;
   persistProfile: BrowserPersistFinalizedProfile<TProfile>;
 } & BrowserSaveActivateOptions<TRuntime>) {
   const payload = createConnectedBrowserProfilePayload({
@@ -42,7 +41,6 @@ export async function saveConnectedBrowserProfileAndMaybeActivate<TProfile, TRun
       runtimeSnapshotJson: args.runtimeSnapshotJson ?? null,
       onboardingPackage: args.onboardingPackage ?? null,
       artifactNamespace: args.artifactNamespace,
-      publishBackup: args.publishBackup ?? false,
     });
   } catch (error) {
     logSharedSaveFailure({
@@ -74,7 +72,6 @@ export async function saveRotatedBrowserProfileAndMaybeActivate<TProfile, TRunti
   runtimeSnapshotJson?: string | null;
   onboardingPackage?: string | null;
   artifactNamespace?: string;
-  publishBackup?: boolean;
   persistProfile: BrowserPersistFinalizedProfile<TProfile>;
 } & BrowserSaveActivateOptions<TRuntime>) {
   let targetPayload: BrowserProfilePackagePayload;
@@ -111,7 +108,6 @@ export async function saveRotatedBrowserProfileAndMaybeActivate<TProfile, TRunti
         args.runtimeSnapshotJson ?? args.targetProfile.runtimeSnapshotJson ?? null,
       onboardingPackage: args.onboardingPackage ?? null,
       artifactNamespace: args.artifactNamespace,
-      publishBackup: args.publishBackup ?? false,
     });
   } catch (error) {
     logSharedSaveFailure({
