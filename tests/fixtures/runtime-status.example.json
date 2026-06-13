@@ -38,7 +38,15 @@
       "outgoing_available": 4,
       "outgoing_spent": 1,
       "can_sign": true,
-      "should_send_nonces": true
+      "can_ecdh": true,
+      "can_ping": true,
+      "should_send_nonces": true,
+      "last_response_latency_ms": 120,
+      "avg_latency_ms": 95,
+      "nonce_history": [
+        { "ts": 1716999980, "held": 4 },
+        { "ts": 1716999990, "held": 3 }
+      ]
     },
     {
       "idx": 2,
@@ -50,7 +58,12 @@
       "outgoing_available": 0,
       "outgoing_spent": 0,
       "can_sign": false,
-      "should_send_nonces": false
+      "can_ecdh": false,
+      "can_ping": false,
+      "should_send_nonces": false,
+      "last_response_latency_ms": null,
+      "avg_latency_ms": null,
+      "nonce_history": []
     }
   ],
   "peer_permission_states": [

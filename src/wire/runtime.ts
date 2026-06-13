@@ -22,6 +22,12 @@ export type DecodedOnboardingProfile = {
   relays: string[];
 };
 
+/** One `(ts, held)` nonce-inventory sample for the dashboard sparkline. */
+export type RuntimeNonceHistoryPoint = {
+  ts: number;
+  held: number;
+};
+
 export type RuntimePeerStatus = {
   idx: number;
   pubkey: string;
@@ -32,7 +38,15 @@ export type RuntimePeerStatus = {
   outgoing_available: number;
   outgoing_spent: number;
   can_sign: boolean;
+  can_ecdh: boolean;
+  can_ping: boolean;
   should_send_nonces: boolean;
+  /** Most recent PING round-trip latency (ms); null until a ping completes. */
+  last_response_latency_ms: number | null;
+  /** Rolling-window mean PING latency (ms); null until a ping completes. */
+  avg_latency_ms: number | null;
+  /** Bounded nonce-held history (oldest first) for the sparkline. */
+  nonce_history: RuntimeNonceHistoryPoint[];
 };
 
 export type RuntimeMetadata = {

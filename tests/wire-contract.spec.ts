@@ -91,7 +91,12 @@ describe('PR29 wire-type contract', () => {
       expect(typeof peer.outgoing_available).toBe('number');
       expect(typeof peer.outgoing_spent).toBe('number');
       expect(typeof peer.can_sign).toBe('boolean');
+      expect(typeof peer.can_ecdh).toBe('boolean');
+      expect(typeof peer.can_ping).toBe('boolean');
       expect(typeof peer.should_send_nonces).toBe('boolean');
+      expect(peer.last_response_latency_ms === null || typeof peer.last_response_latency_ms === 'number').toBe(true);
+      expect(peer.avg_latency_ms === null || typeof peer.avg_latency_ms === 'number').toBe(true);
+      expect(Array.isArray(peer.nonce_history)).toBe(true);
     }
   });
 
