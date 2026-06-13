@@ -18,8 +18,6 @@ const profileRequiredExports = [
   'bfshare_prefix',
   'bfonboard_prefix',
   'bfprofile_prefix',
-  'profile_backup_event_kind',
-  'profile_backup_key_domain',
   'derive_profile_id_from_share_secret',
   'derive_profile_id_from_share_pubkey',
   'encode_bfprofile_package',
@@ -29,13 +27,6 @@ const profileRequiredExports = [
   'encode_bfonboard_package',
   'decode_bfonboard_package',
   'create_profile_package_pair',
-  'create_encrypted_profile_backup',
-  'derive_profile_backup_conversation_key_hex',
-  'encrypt_profile_backup_content',
-  'decrypt_profile_backup_content',
-  'build_profile_backup_event',
-  'parse_profile_backup_event',
-  'recover_profile_from_share_and_backup',
 ];
 
 async function loadWasmModule(moduleStem) {
@@ -61,7 +52,7 @@ assertExports(bridgeModule, bridgeRequiredExports, 'bifrost-bridge-wasm');
 const profileModule = await loadWasmModule('bifrost_profile_wasm');
 assertExports(profileModule, profileRequiredExports, 'bifrost-profile-wasm');
 
-if (profileModule.bf_package_version() !== 1) {
+if (profileModule.bf_package_version() !== 2) {
   throw new Error(`Unexpected bf_package_version: ${profileModule.bf_package_version()}`);
 }
 if (profileModule.bfshare_prefix() !== 'bfshare') {
@@ -72,16 +63,6 @@ if (profileModule.bfonboard_prefix() !== 'bfonboard') {
 }
 if (profileModule.bfprofile_prefix() !== 'bfprofile') {
   throw new Error(`Unexpected bfprofile_prefix: ${profileModule.bfprofile_prefix()}`);
-}
-if (profileModule.profile_backup_event_kind() !== 10000) {
-  throw new Error(
-    `Unexpected profile_backup_event_kind: ${profileModule.profile_backup_event_kind()}`,
-  );
-}
-if (profileModule.profile_backup_key_domain() !== 'frostr-profile-backup/v1') {
-  throw new Error(
-    `Unexpected profile_backup_key_domain: ${profileModule.profile_backup_key_domain()}`,
-  );
 }
 
 console.log('ok: bifrost bridge/profile wasm browser package exports are present');
