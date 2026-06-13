@@ -27,6 +27,37 @@ function isStructurallyRestorableSnapshot(raw: string): boolean {
   }
 }
 
+/**
+ * Resolve the group + share package JSON for a clean profile bootstrap, from
+ * either an explicit bootstrap profile or a package payload. Used both for the
+ * `profile` bootstrap mode and to carry fallback packages alongside a persisted
+ * snapshot so the runtime can re-bootstrap if the snapshot fails to restore.
+ */
+function resolveBootstrapPackages(
+  profile: BrowserProfileRuntimeBootstrapInput,
+  profilePayload?: BrowserRuntimeProfilePayload,
+): { groupPackageJson: string; sharePackageJson: string } | null {
+  if (profilePayload) {
+    return {
+      groupPackageJson: groupJsonFromPayload(profilePayload),
+      sharePackageJson: shareJsonFromPayload(profilePayload),
+    };
+  }
+  if ('groupPackageJson' in profile && 'sharePackageJson' in profile) {
+    return {
+      groupPackageJson: profile.groupPackageJson,
+      sharePackageJson: profile.sharePackageJson,
+    };
+  }
+  return null;
+}
+
+function bootstrapPeerPubkey32Hex(profile: BrowserProfileRuntimeBootstrapInput): string | undefined {
+  return typeof profile.peerPubkey === 'string' && profile.peerPubkey.trim().length > 0
+    ? profile.peerPubkey.trim().toLowerCase()
+    : undefined;
+}
+
 export function createBrowserRuntimeNodeInit(
   profile: BrowserProfileRuntimeBootstrapInput,
   profilePayload?: BrowserRuntimeProfilePayload,
@@ -38,12 +69,24 @@ export function createBrowserRuntimeNodeInit(
       ? profile.runtimeSnapshotJson
       : null;
 
+  const packages = resolveBootstrapPackages(profile, profilePayload);
+
   if (snapshotJson) {
     return {
       config: {
         mode: 'persisted',
         relays: profile.relays,
         signerSettings: normalizeSignerSettings(profile.signerSettings),
+        // Carry the profile packages (when known) so the runtime can fall back
+        // to a clean bootstrap if the snapshot fails to restore — see the
+        // resilient-restore path in the bridge.
+        ...(packages
+          ? {
+              groupPackageJson: packages.groupPackageJson,
+              sharePackageJson: packages.sharePackageJson,
+              bootstrapPeerPubkey32Hex: bootstrapPeerPubkey32Hex(profile),
+            }
+          : {}),
       },
       restoreOptions: {
         runtimeSnapshotJson: snapshotJson,
@@ -51,22 +94,7 @@ export function createBrowserRuntimeNodeInit(
     };
   }
 
-  if (!profilePayload) {
-    if ('groupPackageJson' in profile && 'sharePackageJson' in profile) {
-      return {
-        config: {
-          mode: 'profile',
-          relays: profile.relays,
-          signerSettings: normalizeSignerSettings(profile.signerSettings),
-          bootstrapPeerPubkey32Hex:
-            typeof profile.peerPubkey === 'string' && profile.peerPubkey.trim().length > 0
-              ? profile.peerPubkey.trim().toLowerCase()
-              : undefined,
-          groupPackageJson: profile.groupPackageJson,
-          sharePackageJson: profile.sharePackageJson,
-        },
-      };
-    }
+  if (!packages) {
     throw new Error('No runtime snapshot found. Unlock or import the profile again.');
   }
 
@@ -75,12 +103,9 @@ export function createBrowserRuntimeNodeInit(
       mode: 'profile',
       relays: profile.relays,
       signerSettings: normalizeSignerSettings(profile.signerSettings),
-      bootstrapPeerPubkey32Hex:
-        typeof profile.peerPubkey === 'string' && profile.peerPubkey.trim().length > 0
-          ? profile.peerPubkey.trim().toLowerCase()
-          : undefined,
-      groupPackageJson: groupJsonFromPayload(profilePayload),
-      sharePackageJson: shareJsonFromPayload(profilePayload),
+      bootstrapPeerPubkey32Hex: bootstrapPeerPubkey32Hex(profile),
+      groupPackageJson: packages.groupPackageJson,
+      sharePackageJson: packages.sharePackageJson,
     },
   };
 }

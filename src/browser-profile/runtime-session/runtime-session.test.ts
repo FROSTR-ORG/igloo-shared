@@ -30,6 +30,27 @@ describe('browser-runtime-session helpers', () => {
     });
   });
 
+  test('createBrowserRuntimeNodeInit carries fallback packages alongside a persisted snapshot', () => {
+    const init = createBrowserRuntimeNodeInit({
+      relays: ['ws://relay-1'],
+      signerSettings: { ping_timeout_secs: 8 },
+      peerPubkey: 'bb'.repeat(32),
+      runtimeSnapshotJson: '{"state":"ok"}',
+      groupPackageJson: '{"group_name":"Group"}',
+      sharePackageJson: '{"idx":1,"seckey":"11"}',
+    });
+
+    expect(init.config.mode).toBe('persisted');
+    expect(init.restoreOptions).toEqual({ runtimeSnapshotJson: '{"state":"ok"}' });
+    // The packages ride along so the bridge can re-bootstrap from them if the
+    // snapshot fails to restore (resilient restore).
+    expect(init.config).toMatchObject({
+      groupPackageJson: '{"group_name":"Group"}',
+      sharePackageJson: '{"idx":1,"seckey":"11"}',
+      bootstrapPeerPubkey32Hex: 'bb'.repeat(32),
+    });
+  });
+
   test('createBrowserRuntimeNodeInit discards a corrupt snapshot and falls through to profile config', () => {
     const init = createBrowserRuntimeNodeInit({
       relays: ['ws://relay-3'],

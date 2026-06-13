@@ -388,70 +388,24 @@ export class BrowserBridgeNode {
         mode: 'persisted'
       });
       const restored = this.tryRestoreRuntime(runtimeConfig);
-      if (!restored) {
+      if (restored) {
+        this.emitLog('info', 'runtime', 'restore_runtime_ok', {
+          mode: 'persisted'
+        });
+      } else if (this.hasProfileBootstrapPackages()) {
+        // Resilient restore: a snapshot that is structurally valid JSON but
+        // semantically incompatible with the current runtime (or otherwise
+        // un-restorable) must not brick the session. Fall back to a clean
+        // bootstrap from the profile packages carried alongside the snapshot.
+        this.emitLog('warn', 'runtime', 'restore_fallback_to_profile', {
+          reason: 'snapshot_restore_failed'
+        });
+        await this.bootstrapFromProfilePackages(runtimeConfig);
+      } else {
         throw new Error('Failed to restore runtime snapshot');
       }
-      this.emitLog('info', 'runtime', 'restore_runtime_ok', {
-        mode: 'persisted'
-      });
     } else if (this.config.mode === 'profile') {
-      let profileBootstrap: ProfileBootstrapState;
-      try {
-        profileBootstrap = this.buildProfileBootstrap();
-      } catch (error) {
-        throw withContext('Failed to build profile runtime bootstrap', error);
-      }
-      const bootstrapPeerPubkey =
-        typeof this.config.bootstrapPeerPubkey32Hex === 'string' &&
-        this.config.bootstrapPeerPubkey32Hex.trim().length > 0
-          ? normalizePubkey32Hex(this.config.bootstrapPeerPubkey32Hex, 'bootstrap peer public key')
-          : null;
-      if (bootstrapPeerPubkey) {
-        try {
-          const result = await this.requestOnboardResponse({
-            share_secret: profileBootstrap.shareSecret,
-            share_pubkey32: this.localSharePubkey32,
-            peer_pk_xonly: bootstrapPeerPubkey,
-            relays: this.activeRelays
-          });
-          const bootstrapNonces = Array.isArray(result.response.nonces) ? result.response.nonces : [];
-          if (bootstrapNonces.length > 0) {
-            profileBootstrap.bootstrap.initial_peer_nonces = [
-              {
-                peer: bootstrapPeerPubkey,
-                nonces: bootstrapNonces
-              }
-            ];
-            this.emitLog('info', 'runtime', 'profile_bootstrap_nonces_seeded', {
-              peer_pubkey32: bootstrapPeerPubkey,
-              nonce_count: bootstrapNonces.length
-            });
-          } else {
-            this.emitLog('warn', 'runtime', 'profile_bootstrap_nonces_empty', {
-              peer_pubkey32: bootstrapPeerPubkey
-            });
-          }
-        } catch (error) {
-          this.emitLog('warn', 'runtime', 'profile_bootstrap_nonces_failed', {
-            peer_pubkey32: bootstrapPeerPubkey,
-            error_message: toErrorMessage(error, 'failed to fetch bootstrap nonces')
-          });
-        }
-      }
-      try {
-        this.emitLog('info', 'runtime', 'init_runtime_begin', {
-          mode: 'profile'
-        });
-        this.runtime.init_runtime(
-          JSON.stringify(runtimeConfig),
-          JSON.stringify(profileBootstrap.bootstrap)
-        );
-        this.emitLog('info', 'runtime', 'init_runtime_ok', {
-          mode: 'profile'
-        });
-      } catch (error) {
-        throw withContext('Failed to initialize signer runtime', error);
-      }
+      await this.bootstrapFromProfilePackages(runtimeConfig);
     } else {
       let onboardResponse: OnboardResponseWire;
       let onboardRequest: OnboardingRequestBundleWire;
@@ -1001,6 +955,81 @@ export class BrowserBridgeNode {
       this.peerPubkeys32.clear();
       this.xonlyToPeer32.clear();
       return false;
+    }
+  }
+
+  private hasProfileBootstrapPackages(): boolean {
+    return (
+      typeof this.config.groupPackageJson === 'string' &&
+      this.config.groupPackageJson.trim().length > 0 &&
+      typeof this.config.sharePackageJson === 'string' &&
+      this.config.sharePackageJson.trim().length > 0
+    );
+  }
+
+  /**
+   * Clean-bootstrap the runtime from the profile packages (group + share),
+   * seeding bootstrap nonces from the inviter peer when one is configured. This
+   * is the `profile`-mode path, and also the fallback the `persisted` path uses
+   * when a snapshot fails to restore.
+   */
+  private async bootstrapFromProfilePackages(runtimeConfig: Record<string, unknown>): Promise<void> {
+    let profileBootstrap: ProfileBootstrapState;
+    try {
+      profileBootstrap = this.buildProfileBootstrap();
+    } catch (error) {
+      throw withContext('Failed to build profile runtime bootstrap', error);
+    }
+    const bootstrapPeerPubkey =
+      typeof this.config.bootstrapPeerPubkey32Hex === 'string' &&
+      this.config.bootstrapPeerPubkey32Hex.trim().length > 0
+        ? normalizePubkey32Hex(this.config.bootstrapPeerPubkey32Hex, 'bootstrap peer public key')
+        : null;
+    if (bootstrapPeerPubkey) {
+      try {
+        const result = await this.requestOnboardResponse({
+          share_secret: profileBootstrap.shareSecret,
+          share_pubkey32: this.localSharePubkey32,
+          peer_pk_xonly: bootstrapPeerPubkey,
+          relays: this.activeRelays
+        });
+        const bootstrapNonces = Array.isArray(result.response.nonces) ? result.response.nonces : [];
+        if (bootstrapNonces.length > 0) {
+          profileBootstrap.bootstrap.initial_peer_nonces = [
+            {
+              peer: bootstrapPeerPubkey,
+              nonces: bootstrapNonces
+            }
+          ];
+          this.emitLog('info', 'runtime', 'profile_bootstrap_nonces_seeded', {
+            peer_pubkey32: bootstrapPeerPubkey,
+            nonce_count: bootstrapNonces.length
+          });
+        } else {
+          this.emitLog('warn', 'runtime', 'profile_bootstrap_nonces_empty', {
+            peer_pubkey32: bootstrapPeerPubkey
+          });
+        }
+      } catch (error) {
+        this.emitLog('warn', 'runtime', 'profile_bootstrap_nonces_failed', {
+          peer_pubkey32: bootstrapPeerPubkey,
+          error_message: toErrorMessage(error, 'failed to fetch bootstrap nonces')
+        });
+      }
+    }
+    try {
+      this.emitLog('info', 'runtime', 'init_runtime_begin', {
+        mode: 'profile'
+      });
+      this.runtime!.init_runtime(
+        JSON.stringify(runtimeConfig),
+        JSON.stringify(profileBootstrap.bootstrap)
+      );
+      this.emitLog('info', 'runtime', 'init_runtime_ok', {
+        mode: 'profile'
+      });
+    } catch (error) {
+      throw withContext('Failed to initialize signer runtime', error);
     }
   }
 
