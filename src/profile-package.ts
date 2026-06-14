@@ -2,7 +2,7 @@ import { getWasmProfilePackageApi } from './bridge-wasm-runtime';
 
 export type BrowserProtectedPackageKind = 'bfprofile' | 'bfshare' | 'bfonboard';
 
-export type BrowserPolicyOverrideValue = 'unset' | 'allow' | 'deny';
+export type BrowserPolicyOverrideValue = 'unset' | 'allow' | 'deny' | 'ask';
 
 export type BrowserMethodPolicyOverride = {
   echo: BrowserPolicyOverrideValue;

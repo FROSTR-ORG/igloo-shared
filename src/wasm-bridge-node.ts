@@ -725,6 +725,19 @@ export class BrowserBridgeNode {
     this.pumpRuntime(Date.now());
   }
 
+  /**
+   * Resolve a parked approval request (the `ask` policy disposition). Replays the
+   * request and emits its response when `approved`, otherwise sends the requester
+   * an `operator_denied` error. Fire-and-forget over the command surface.
+   */
+  async resolveApproval(requestId: string, approved: boolean): Promise<void> {
+    if (!this.runtime) throw new Error('runtime not initialized');
+    this.runtime.handle_command(
+      JSON.stringify({ type: 'resolve_approval', request_id: requestId, approved })
+    );
+    this.pumpRuntime(Date.now());
+  }
+
   async signNostrEvent(event: Record<string, unknown>): Promise<Event> {
     const pubkey = this.getPublicKey();
     const unsigned = buildUnsignedEvent(event, pubkey);

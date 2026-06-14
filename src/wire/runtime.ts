@@ -124,6 +124,20 @@ export type RuntimeOnboardingStatus = {
 };
 
 /**
+ * An inbound request parked awaiting an operator decision (the `ask` policy
+ * disposition). Mirrors `bifrost_signer::PendingApprovalSummary`. The raw
+ * request payload is intentionally not carried — operators decide on peer +
+ * method, not on the request bytes.
+ */
+export type RuntimePendingApproval = {
+  request_id: string;
+  peer: string;
+  method: string;
+  queued_at: number;
+  expires_at: number;
+};
+
+/**
  * The canonical hosted read model returned by `getRuntimeStatus()` /
  * `node.runtimeStatus()`. Mirrors `bifrost_signer::RuntimeStatusSummary`
  * (bifrost-rs is the source of truth) and is the single surface UIs should
@@ -138,6 +152,7 @@ export type RuntimeStatusSummary = {
   peer_permission_states: RuntimePeerPermissionState[];
   onboarding_statuses?: RuntimeOnboardingStatus[];
   pending_operations: RuntimePendingOperation[];
+  pending_approvals?: RuntimePendingApproval[];
 };
 
 export type RuntimeEvent = {

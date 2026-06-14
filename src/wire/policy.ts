@@ -8,7 +8,7 @@
  * changed; only the declarations moved.
  */
 
-export type PolicyOverrideValue = 'unset' | 'allow' | 'deny';
+export type PolicyOverrideValue = 'unset' | 'allow' | 'deny' | 'ask';
 
 export type RuntimeMethodPolicy = {
   ping: boolean;

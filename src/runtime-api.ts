@@ -289,6 +289,14 @@ export async function clearRuntimePeerPolicyOverridesOnNode(node: BrowserBridgeN
   await node.clearPeerPolicyOverrides();
 }
 
+export async function resolveApprovalOnNode(
+  node: BrowserBridgeNode,
+  requestId: string,
+  approved: boolean
+) {
+  await node.resolveApproval(requestId, approved);
+}
+
 export function updateRuntimeConfigOnNode(
   node: BrowserBridgeNode,
   settings: Partial<SignerSettings>
