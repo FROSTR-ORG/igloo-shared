@@ -134,6 +134,15 @@ export function allPolicyFlagsEnabled(value: unknown): boolean {
   return flags.every((key) => value[key] !== false);
 }
 
+// WARNING: NON-STANDARD NIP-44 conversation key. The IKM here is the FROSTR
+// threshold-ECDH shared secret, which is `SHA256(combined point)` (see
+// bifrost-core `combine_ecdh_packages`) — NOT the raw X-coordinate that standard
+// NIP-44 feeds to HKDF-Extract. So messages produced via this path (including the
+// app-facing `window.nostr.nip44.{encrypt,decrypt}` provider methods) are
+// FROSTR-internal and do NOT interoperate with standard NIP-44 peers. The
+// onboarding path uses the standard `getConversationKey` (raw-X) instead.
+// This divergence is a known interop bug — see BACKLOG: "Unify app-facing NIP-44
+// on the standard raw-X derivation".
 export async function deriveConversationKeyFromSharedSecret(sharedSecretHex32: string): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     'raw',
