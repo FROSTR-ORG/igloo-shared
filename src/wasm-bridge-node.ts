@@ -570,6 +570,12 @@ export class BrowserBridgeNode {
       throw new Error('runtime not initialized');
     }
     const status = JSON.parse(this.runtime.runtime_status()) as RuntimeStatusSummary;
+    // Bridge-enrich the core read model: relay sockets live in this bridge, not
+    // the signer core (which emits these as null). `last_load_error` stays a
+    // host signal — a hard restore failure throws out of connect() (no runtime
+    // to read), so clients drive load-failed from their own activation error.
+    status.configured_relays = this.activeRelays;
+    status.connected_relays = Array.from(this.connectedRelays);
     this.lastRuntimeStatus = status;
     return status;
   }

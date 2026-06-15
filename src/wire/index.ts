@@ -25,6 +25,8 @@ export type {
   RuntimeStatusDetails,
   RuntimePendingOperation,
   RuntimePendingApproval,
+  RuntimeOperationFailure,
+  RuntimeLoadError,
   RuntimeOnboardingStatus,
   RuntimeStatusSummary,
   RuntimeEvent,

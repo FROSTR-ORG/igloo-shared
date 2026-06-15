@@ -138,6 +138,35 @@ export type RuntimePendingApproval = {
 };
 
 /**
+ * The most recent `sign` operation failure retained for host display (the
+ * signing-failed dashboard condition). Mirrors
+ * `bifrost_signer::OperationFailureSummary`. Present only after a sign op
+ * fails; cleared by the core on the next successful sign.
+ */
+export type RuntimeOperationFailure = {
+  request_id: string;
+  /** Mirrors `PendingOpType` (serde-tagged); a sign failure carries `'Sign'`. */
+  op_type: 'Sign' | 'Ecdh' | 'Ping' | 'Onboard';
+  /** Mirrors `OperationFailureCode` (snake_case). */
+  code: 'timeout' | 'invalid_locked_peer_response' | 'peer_rejected';
+  message: string;
+  failed_peer?: string | null;
+  /** Unix seconds when the failure was observed. */
+  failed_at: number;
+};
+
+/**
+ * Most recent profile load/restore failure (the load-failed dashboard
+ * condition). Mirrors `bifrost_signer::LoadErrorSummary`. Host/bridge-enriched
+ * — see {@link RuntimeStatusSummary.last_load_error}.
+ */
+export type RuntimeLoadError = {
+  message: string;
+  /** Unix seconds when the load/restore failure was observed. */
+  at: number;
+};
+
+/**
  * The canonical hosted read model returned by `getRuntimeStatus()` /
  * `node.runtimeStatus()`. Mirrors `bifrost_signer::RuntimeStatusSummary`
  * (bifrost-rs is the source of truth) and is the single surface UIs should
@@ -153,6 +182,26 @@ export type RuntimeStatusSummary = {
   onboarding_statuses?: RuntimeOnboardingStatus[];
   pending_operations: RuntimePendingOperation[];
   pending_approvals?: RuntimePendingApproval[];
+  /**
+   * Most recent sign failure retained by the core (signing-failed condition).
+   * Absent until a sign op fails; cleared on the next successful sign.
+   */
+  last_sign_failure?: RuntimeOperationFailure | null;
+  /**
+   * Currently-connected relay URLs. **Host/bridge-enriched** — the signer core
+   * does not own relay sockets, so the core omits this and the bridge fills it
+   * (browser bridge in TS; native Tokio bridge). `undefined` means "not
+   * reported"; `[]` means "reported, zero connected" (drives all-relays-offline).
+   */
+  connected_relays?: string[] | null;
+  /** Configured relay URLs (host/bridge-enriched); gives "N of M" context. */
+  configured_relays?: string[] | null;
+  /**
+   * Most recent profile load/restore failure (load-failed condition).
+   * **Host/bridge-enriched** — restore errors are returned at call time, not
+   * retained by the core; the bridge layer caches and fills this.
+   */
+  last_load_error?: RuntimeLoadError | null;
 };
 
 export type RuntimeEvent = {
