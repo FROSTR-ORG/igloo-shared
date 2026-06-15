@@ -129,3 +129,59 @@ describe('refreshRelayHealth', () => {
     expect([...internals.connectedRelays]).toEqual([]);
   });
 });
+
+describe('relay-health visibility back-off', () => {
+  // igloo-shared tests run in node (no DOM), so inject a minimal document to
+  // drive the bridge's visibility handler directly.
+  type VisInternals = {
+    pool: object | null;
+    relayHealthHandle: ReturnType<typeof setInterval> | null;
+    refreshRelayHealth: () => Promise<boolean>;
+    startRelayHealthProbe: () => void;
+    stopRelayHealthProbe: () => void;
+    onVisibilityChange: () => void;
+  };
+
+  test('pauses the re-probe when hidden and resumes when visible', async () => {
+    const fakeDocument = { hidden: false } as { hidden: boolean };
+    (globalThis as { document?: unknown }).document = fakeDocument;
+    try {
+      const node = new BrowserBridgeNode(baseConfig);
+      const internals = node as unknown as VisInternals;
+      internals.pool = {}; // mark "connected" so the handler acts
+      internals.refreshRelayHealth = vi.fn().mockResolvedValue(false);
+
+      internals.startRelayHealthProbe();
+      expect(internals.relayHealthHandle).not.toBeNull();
+
+      // Hidden → probe paused.
+      fakeDocument.hidden = true;
+      internals.onVisibilityChange();
+      expect(internals.relayHealthHandle).toBeNull();
+
+      // Visible again → probe restarted + an immediate refresh.
+      fakeDocument.hidden = false;
+      internals.onVisibilityChange();
+      expect(internals.relayHealthHandle).not.toBeNull();
+      expect(internals.refreshRelayHealth).toHaveBeenCalled();
+
+      internals.stopRelayHealthProbe();
+    } finally {
+      delete (globalThis as { document?: unknown }).document;
+    }
+  });
+
+  test('does nothing when not connected (no pool)', () => {
+    const fakeDocument = { hidden: true } as { hidden: boolean };
+    (globalThis as { document?: unknown }).document = fakeDocument;
+    try {
+      const node = new BrowserBridgeNode(baseConfig);
+      const internals = node as unknown as VisInternals;
+      internals.pool = null;
+      internals.onVisibilityChange();
+      expect(internals.relayHealthHandle).toBeNull();
+    } finally {
+      delete (globalThis as { document?: unknown }).document;
+    }
+  });
+});

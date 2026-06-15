@@ -127,6 +127,24 @@ export class BrowserBridgeNode {
   private relaySubscription: { close: (reason?: string) => void } | null = null;
   private tickHandle: ReturnType<typeof setInterval> | null = null;
   private relayHealthHandle: ReturnType<typeof setInterval> | null = null;
+  // Pause the relay-health re-probe while the tab is backgrounded (nothing is
+  // watching the dashboard). Bound once so add/removeEventListener match. A
+  // no-op where there is no `document` (the chrome MV3 service worker, which the
+  // browser already lifecycle-suspends when idle).
+  private readonly onVisibilityChange = (): void => {
+    if (!this.pool) return; // not connected; nothing to probe
+    if (typeof document !== 'undefined' && document.hidden) {
+      this.stopRelayHealthProbe();
+    } else if (!this.relayHealthHandle) {
+      this.startRelayHealthProbe();
+      // Connectivity may have changed while hidden — refresh now, don't wait a tick.
+      void this.refreshRelayHealth()
+        .then((changed) => {
+          if (changed) this.pumpRuntime(Date.now());
+        })
+        .catch(() => {});
+    }
+  };
   private runtime: WasmBridgeRuntimeApi | null = null;
 
   private activeRelays: string[] = [];
@@ -322,6 +340,26 @@ export class BrowserBridgeNode {
     );
   }
 
+  private startRelayHealthProbe(): void {
+    if (this.relayHealthHandle) return;
+    this.relayHealthHandle = setInterval(() => {
+      void this.refreshRelayHealth()
+        .then((changed) => {
+          if (changed) this.pumpRuntime(Date.now());
+        })
+        .catch(() => {
+          /* refreshRelayHealth swallows per-relay errors; nothing to surface */
+        });
+    }, RELAY_HEALTH_INTERVAL_MS);
+  }
+
+  private stopRelayHealthProbe(): void {
+    if (this.relayHealthHandle) {
+      clearInterval(this.relayHealthHandle);
+      this.relayHealthHandle = null;
+    }
+  }
+
   private relayTargets(): string[] {
     return this.connectedRelays.size > 0 ? Array.from(this.connectedRelays) : this.activeRelays;
   }
@@ -496,17 +534,14 @@ export class BrowserBridgeNode {
     }, 1_000);
 
     // Background relay-health re-probe: keeps connected_relays current so the
-    // dashboard can detect relays dropping/recovering after bootstrap. Pumps a
-    // runtime-status event only when the connected set actually changes.
-    this.relayHealthHandle = setInterval(() => {
-      void this.refreshRelayHealth()
-        .then((changed) => {
-          if (changed) this.pumpRuntime(Date.now());
-        })
-        .catch(() => {
-          /* refreshRelayHealth swallows per-relay errors; nothing to surface */
-        });
-    }, RELAY_HEALTH_INTERVAL_MS);
+    // dashboard can detect relays dropping/recovering after bootstrap. Paused
+    // while the tab is hidden (see onVisibilityChange).
+    this.startRelayHealthProbe();
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.onVisibilityChange);
+      // Sync to the initial visibility (pauses immediately if started hidden).
+      this.onVisibilityChange();
+    }
 
     this.pumpRuntime(Date.now());
 
@@ -529,9 +564,9 @@ export class BrowserBridgeNode {
       this.tickHandle = null;
     }
 
-    if (this.relayHealthHandle) {
-      clearInterval(this.relayHealthHandle);
-      this.relayHealthHandle = null;
+    this.stopRelayHealthProbe();
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.onVisibilityChange);
     }
 
     this.relaySubscription?.close('shutdown');

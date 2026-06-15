@@ -197,9 +197,14 @@ export type RuntimeStatusSummary = {
   /** Configured relay URLs (host/bridge-enriched); gives "N of M" context. */
   configured_relays?: string[] | null;
   /**
-   * Most recent profile load/restore failure (load-failed condition).
-   * **Host/bridge-enriched** — restore errors are returned at call time, not
-   * retained by the core; the bridge layer caches and fills this.
+   * Reserved load/restore-failure slot for the load-failed condition. In
+   * practice the bridges **always leave this `null`**: a hard load failure means
+   * there is no running runtime to query — a native restore failure aborts daemon
+   * startup, and the browser `connect()` throws before any runtime exists. So
+   * each client drives the load-failed screen from its own start-error state
+   * (pwa `dashboardLoadError`, home's start-error), not this field. Kept as a
+   * cheap optional in case a future host can surface a load error from a *running*
+   * runtime.
    */
   last_load_error?: RuntimeLoadError | null;
 };
