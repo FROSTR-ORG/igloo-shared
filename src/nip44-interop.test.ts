@@ -4,6 +4,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { generateSecretKey, getPublicKey, nip44 } from 'nostr-tools';
 
 import { deriveConversationKeyFromSharedSecret } from './runtime-internal';
+import { normalizeNip44PayloadForRust } from './nip44-normalize';
 
 // FROSTR's app-facing NIP-44 (`window.nostr.nip44.*` → nip44Encrypt →
 // deriveConversationKeyFromSharedSecret) must interoperate with standard nostr
@@ -70,5 +71,36 @@ describe('NIP-44 interop: FROSTR app-facing path vs a standard nostr client', ()
 
     const frostrKey = await deriveConversationKeyFromSharedSecret(frostrSharedSecretHex(privA, pubB));
     expect(nip44.v2.decrypt(ciphertext, frostrKey)).toBe('gm from a normal client');
+  });
+
+  // Wire-format regression: the app-facing `nip44Encrypt` (wasm-bridge-node.ts)
+  // must return standard, canonically-padded base64 — exactly `nip44.v2.encrypt`'s
+  // output. It previously applied `normalizeNip44PayloadForRust`, which strips the
+  // `=` padding; strict standard decoders (nostr-tools / @scure/base) then reject
+  // it, so FROSTR ciphertext was undecryptable by a standard client even with the
+  // correct conversation key. These two cases lock that contract.
+  it('app-facing ciphertext is standard padded base64 a standard client decodes as-is', async () => {
+    const privA = generateSecretKey();
+    const pubB = getPublicKey(generateSecretKey());
+    const frostrKey = await deriveConversationKeyFromSharedSecret(frostrSharedSecretHex(privA, pubB));
+
+    const ciphertext = nip44.v2.encrypt('gm', frostrKey);
+    expect(ciphertext.length % 4).toBe(0); // canonical base64 padding
+    expect(nip44.v2.decrypt(ciphertext, frostrKey)).toBe('gm'); // decodes without re-padding
+  });
+
+  it('stripping base64 padding (the old normalizeNip44PayloadForRust) breaks standard decrypt', async () => {
+    const privA = generateSecretKey();
+    const pubB = getPublicKey(generateSecretKey());
+    const frostrKey = await deriveConversationKeyFromSharedSecret(frostrSharedSecretHex(privA, pubB));
+
+    // Pick a plaintext whose NIP-44 payload actually carries base64 `=` padding
+    // (it depends on payload-byte-length mod 3): a 33-char message pads to a
+    // 131-byte payload → a trailing `=`. The guard below keeps this honest.
+    const padded = nip44.v2.encrypt('x'.repeat(33), frostrKey);
+    expect(padded.endsWith('=')).toBe(true);
+    const stripped = normalizeNip44PayloadForRust(padded);
+    expect(stripped).not.toBe(padded);
+    expect(() => nip44.v2.decrypt(stripped, frostrKey)).toThrow();
   });
 });

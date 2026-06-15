@@ -21,10 +21,7 @@ import {
 } from './bridge-wasm-runtime';
 import { decodeBfOnboardPackage } from './profile-package';
 import { RuntimeReadinessTimeoutError } from './errors';
-import {
-  normalizeNip44PayloadForJs,
-  normalizeNip44PayloadForRust
-} from './nip44-normalize';
+import { normalizeNip44PayloadForJs } from './nip44-normalize';
 import {
   normalizeSignerSettings,
   type SignerSettings
@@ -852,7 +849,13 @@ export class BrowserBridgeNode {
       pubkey32_hex: pubkey.toLowerCase()
     });
     const conversationKey = await deriveConversationKeyFromSharedSecret(sharedSecretHex32);
-    return normalizeNip44PayloadForRust(nip44.v2.encrypt(plaintext, conversationKey));
+    // Return standard, canonically-padded NIP-44 base64 (what `nip44.v2.encrypt`
+    // emits) so the app-facing `window.nostr.nip44.encrypt` ciphertext is decodable
+    // by any standard nostr client. Stripping the `=` padding here (the old
+    // `normalizeNip44PayloadForRust`) broke interop: strict decoders (nostr-tools /
+    // @scure/base) reject unpadded base64. The decrypt path below still accepts both
+    // forms via `normalizeNip44PayloadForJs`, so legacy unpadded payloads still work.
+    return nip44.v2.encrypt(plaintext, conversationKey);
   }
 
   async nip44Decrypt(pubkey: string, ciphertext: string): Promise<string> {
