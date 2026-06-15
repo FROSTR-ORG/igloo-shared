@@ -39,6 +39,9 @@ export const BRIDGE_COMMAND_TIMEOUT_MS = 10_000;
 export const PREPARE_OPERATION_TIMEOUT_MS = 10_000;
 export const WASM_RUNTIME_INIT_TIMEOUT_MS = 10_000;
 export const RELAY_CONNECT_TIMEOUT_MS = 10_000;
+// Cadence for the background relay-health re-probe (keeps `connected_relays`
+// current so the dashboard can detect drops/recoveries after bootstrap).
+export const RELAY_HEALTH_INTERVAL_MS = 30_000;
 export const RECOVERED_PENDING_OPS_REASON = 'pending_operations_recovered';
 export const INSUFFICIENT_SIGNING_PEERS_REASON = 'insufficient_signing_peers';
 export const INSUFFICIENT_ECDH_PEERS_REASON = 'insufficient_ecdh_peers';

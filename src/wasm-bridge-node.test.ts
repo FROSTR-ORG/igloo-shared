@@ -82,3 +82,50 @@ describe('connect error path', () => {
     await expect(node.connect()).rejects.toThrow('Failed to load WASM runtime');
   });
 });
+
+describe('refreshRelayHealth', () => {
+  // refreshRelayHealth is private and exercises probeRelayWebSocket + the relay
+  // pool; inject fakes the way the other isolation tests reach internals.
+  type Internals = {
+    pool: { ensureRelay: (relay: string) => Promise<void> };
+    activeRelays: string[];
+    connectedRelays: Set<string>;
+    probeRelayWebSocket: (relay: string) => Promise<void>;
+    refreshRelayHealth: (opts?: { verbose?: boolean }) => Promise<boolean>;
+  };
+
+  function nodeWith(relays: string[], up: Set<string>) {
+    const node = new BrowserBridgeNode({ mode: 'persisted', relays });
+    const internals = node as unknown as Internals;
+    internals.activeRelays = relays;
+    internals.pool = {
+      ensureRelay: (relay: string) =>
+        up.has(relay) ? Promise.resolve() : Promise.reject(new Error('down')),
+    };
+    internals.probeRelayWebSocket = (relay: string) =>
+      up.has(relay) ? Promise.resolve() : Promise.reject(new Error('probe failed'));
+    return { node, internals };
+  }
+
+  test('recomputes the connected set and reports changes', async () => {
+    const up = new Set(['wss://a', 'wss://b']);
+    const { internals } = nodeWith(['wss://a', 'wss://b'], up);
+
+    // First refresh: both up, set changes from empty → true.
+    expect(await internals.refreshRelayHealth()).toBe(true);
+    expect([...internals.connectedRelays].sort()).toEqual(['wss://a', 'wss://b']);
+
+    // Idempotent refresh: nothing changed → false.
+    expect(await internals.refreshRelayHealth()).toBe(false);
+
+    // A relay drops: set shrinks → true, and reflects only the live relay.
+    up.delete('wss://b');
+    expect(await internals.refreshRelayHealth()).toBe(true);
+    expect([...internals.connectedRelays]).toEqual(['wss://a']);
+
+    // All relays drop → empty set (a valid all-relays-offline state, no throw).
+    up.delete('wss://a');
+    expect(await internals.refreshRelayHealth()).toBe(true);
+    expect([...internals.connectedRelays]).toEqual([]);
+  });
+});

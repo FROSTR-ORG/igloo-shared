@@ -37,6 +37,7 @@ import {
   PREPARE_OPERATION_TIMEOUT_MS,
   WASM_RUNTIME_INIT_TIMEOUT_MS,
   RELAY_CONNECT_TIMEOUT_MS,
+  RELAY_HEALTH_INTERVAL_MS,
   logger,
   withTimeout,
   canProceedWhileDegraded,
@@ -125,6 +126,7 @@ export class BrowserBridgeNode {
   private pool: SimplePool | null = null;
   private relaySubscription: { close: (reason?: string) => void } | null = null;
   private tickHandle: ReturnType<typeof setInterval> | null = null;
+  private relayHealthHandle: ReturnType<typeof setInterval> | null = null;
   private runtime: WasmBridgeRuntimeApi | null = null;
 
   private activeRelays: string[] = [];
@@ -261,37 +263,8 @@ export class BrowserBridgeNode {
   private async connectActiveRelays() {
     if (!this.pool) throw new Error('relay pool not initialized');
 
-    this.connectedRelays.clear();
-    this.relayConnectionFailures.clear();
-
-    for (const relay of this.activeRelays) {
-      try {
-        this.emitLog('debug', 'relay', 'probe_start', { relay });
-        await this.probeRelayWebSocket(relay);
-        this.emitLog('debug', 'relay', 'probe_ok', { relay });
-      } catch (error) {
-        const message = toErrorMessage(error, 'relay websocket probe failed');
-        this.relayConnectionFailures.set(relay, message);
-        this.emitLog('warn', 'relay', 'probe_failed', {
-          relay,
-          error_message: message
-        });
-        continue;
-      }
-
-      try {
-        await this.pool.ensureRelay(relay, { connectionTimeout: 3_000 });
-        this.connectedRelays.add(relay);
-        this.emitLog('info', 'relay', 'connected', { relay });
-      } catch (error) {
-        const message = toErrorMessage(error, 'relay connection failed');
-        this.relayConnectionFailures.set(relay, message);
-        this.emitLog('warn', 'relay', 'connect_failed', {
-          relay,
-          error_message: message
-        });
-      }
-    }
+    // Bootstrap probe (verbose per-relay logs); refuse to start with zero relays.
+    await this.refreshRelayHealth({ verbose: true });
 
     if (this.connectedRelays.size === 0) {
       const reasons = Array.from(this.relayConnectionFailures.entries()).map(
@@ -299,6 +272,54 @@ export class BrowserBridgeNode {
       );
       throw new Error(`No connected relays available (${reasons.join('; ')})`);
     }
+  }
+
+  /**
+   * Re-probe every configured relay and recompute `connectedRelays` /
+   * `relayConnectionFailures`. Returns whether the connected set changed.
+   *
+   * Bootstrap calls this with `verbose: true` to keep the per-relay probe logs;
+   * the background interval calls it quietly (the connected-set change is
+   * surfaced to the UI via `runtime_status()`, not log spam). Unlike the old
+   * bootstrap loop it does NOT throw on zero connected — post-boot "zero
+   * connected" is a valid all-relays-offline state the dashboard renders.
+   */
+  private async refreshRelayHealth(opts: { verbose?: boolean } = {}): Promise<boolean> {
+    if (!this.pool) return false;
+    const verbose = opts.verbose ?? false;
+    const previous = this.connectedRelays;
+    const connected = new Set<string>();
+    const failures = new Map<string, string>();
+
+    for (const relay of this.activeRelays) {
+      try {
+        if (verbose) this.emitLog('debug', 'relay', 'probe_start', { relay });
+        await this.probeRelayWebSocket(relay);
+        if (verbose) this.emitLog('debug', 'relay', 'probe_ok', { relay });
+      } catch (error) {
+        const message = toErrorMessage(error, 'relay websocket probe failed');
+        failures.set(relay, message);
+        if (verbose) this.emitLog('warn', 'relay', 'probe_failed', { relay, error_message: message });
+        continue;
+      }
+
+      try {
+        await this.pool.ensureRelay(relay, { connectionTimeout: 3_000 });
+        connected.add(relay);
+        if (verbose) this.emitLog('info', 'relay', 'connected', { relay });
+      } catch (error) {
+        const message = toErrorMessage(error, 'relay connection failed');
+        failures.set(relay, message);
+        if (verbose) this.emitLog('warn', 'relay', 'connect_failed', { relay, error_message: message });
+      }
+    }
+
+    this.connectedRelays = connected;
+    this.relayConnectionFailures = failures;
+    return (
+      previous.size !== connected.size ||
+      Array.from(connected).some((relay) => !previous.has(relay))
+    );
   }
 
   private relayTargets(): string[] {
@@ -474,6 +495,19 @@ export class BrowserBridgeNode {
       this.pumpRuntime(Date.now());
     }, 1_000);
 
+    // Background relay-health re-probe: keeps connected_relays current so the
+    // dashboard can detect relays dropping/recovering after bootstrap. Pumps a
+    // runtime-status event only when the connected set actually changes.
+    this.relayHealthHandle = setInterval(() => {
+      void this.refreshRelayHealth()
+        .then((changed) => {
+          if (changed) this.pumpRuntime(Date.now());
+        })
+        .catch(() => {
+          /* refreshRelayHealth swallows per-relay errors; nothing to surface */
+        });
+    }, RELAY_HEALTH_INTERVAL_MS);
+
     this.pumpRuntime(Date.now());
 
     this.emitLog('info', 'runtime', 'bootstrap_complete', {
@@ -493,6 +527,11 @@ export class BrowserBridgeNode {
     if (this.tickHandle) {
       clearInterval(this.tickHandle);
       this.tickHandle = null;
+    }
+
+    if (this.relayHealthHandle) {
+      clearInterval(this.relayHealthHandle);
+      this.relayHealthHandle = null;
     }
 
     this.relaySubscription?.close('shutdown');
