@@ -49,7 +49,9 @@ describe('browser-profile-recovery orchestration', () => {
 
     const imported = await importBrowserProfilePackage('  bfprofile  ', 'secret');
 
-    expect(decodeBfProfilePackage).toHaveBeenCalledWith('bfprofile', 'secret');
+    const calls = decodeBfProfilePackage.mock.calls as unknown as unknown[][];
+    expect(calls[0]![0]).toBe('bfprofile');
+    expect((calls[0]![1] as { expose: () => string }).expose()).toBe('secret');
     expect(imported).toEqual(
       expect.objectContaining({
         source: 'bfprofile',

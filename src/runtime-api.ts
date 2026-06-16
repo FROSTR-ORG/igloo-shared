@@ -8,6 +8,7 @@
 import { getPublicKey, type Event } from 'nostr-tools';
 
 import { decodeBfOnboardPackage } from './profile-package';
+import { Secret } from './secret';
 import {
   logger,
   isRecord,
@@ -116,7 +117,7 @@ export async function decodeOnboardingProfile(
   value: string,
   password: string
 ): Promise<DecodedOnboardingProfile> {
-  const decoded = await decodeBfOnboardPackage(value.trim(), password);
+  const decoded = await decodeBfOnboardPackage(value.trim(), Secret.of(password));
   const shareSecret = decoded.shareSecret;
   const publicKey =
     typeof shareSecret === 'string' ? getPublicKey(hexToBytes(shareSecret)).toLowerCase() : null;

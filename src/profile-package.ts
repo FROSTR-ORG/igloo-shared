@@ -1,4 +1,5 @@
 import { getWasmProfilePackageApi } from './bridge-wasm-runtime';
+import type { Passphrase } from './secret';
 
 export type BrowserProtectedPackageKind = 'bfprofile' | 'bfshare' | 'bfonboard';
 
@@ -187,49 +188,51 @@ export function groupPackageFromWireJson(json: string): BrowserGroupPackage {
   };
 }
 
-export async function encodeBfSharePackage(payload: BrowserSharePackagePayload, password: string) {
+// The package password is a `Passphrase` (redacted on log, greppable `.expose()`),
+// unwrapped only here at the WASM boundary.
+export async function encodeBfSharePackage(payload: BrowserSharePackagePayload, password: Passphrase) {
   const api = await getWasmProfilePackageApi();
-  return api.encode_bfshare_package(JSON.stringify(payload), password);
+  return api.encode_bfshare_package(JSON.stringify(payload), password.expose());
 }
 
-export async function decodeBfSharePackage(packageText: string, password: string) {
+export async function decodeBfSharePackage(packageText: string, password: Passphrase) {
   const api = await getWasmProfilePackageApi();
   return parseJson<BrowserSharePackagePayload>(
-    api.decode_bfshare_package(packageText, password),
+    api.decode_bfshare_package(packageText, password.expose()),
     'bfshare payload',
   );
 }
 
-export async function encodeBfOnboardPackage(payload: BrowserOnboardPackagePayload, password: string) {
+export async function encodeBfOnboardPackage(payload: BrowserOnboardPackagePayload, password: Passphrase) {
   const api = await getWasmProfilePackageApi();
-  return api.encode_bfonboard_package(JSON.stringify(payload), password);
+  return api.encode_bfonboard_package(JSON.stringify(payload), password.expose());
 }
 
-export async function decodeBfOnboardPackage(packageText: string, password: string) {
+export async function decodeBfOnboardPackage(packageText: string, password: Passphrase) {
   const api = await getWasmProfilePackageApi();
   return parseJson<BrowserOnboardPackagePayload>(
-    api.decode_bfonboard_package(packageText, password),
+    api.decode_bfonboard_package(packageText, password.expose()),
     'bfonboard payload',
   );
 }
 
-export async function encodeBfProfilePackage(payload: BrowserProfilePackagePayload, password: string) {
+export async function encodeBfProfilePackage(payload: BrowserProfilePackagePayload, password: Passphrase) {
   const api = await getWasmProfilePackageApi();
-  return api.encode_bfprofile_package(JSON.stringify(payload), password);
+  return api.encode_bfprofile_package(JSON.stringify(payload), password.expose());
 }
 
-export async function decodeBfProfilePackage(packageText: string, password: string) {
+export async function decodeBfProfilePackage(packageText: string, password: Passphrase) {
   const api = await getWasmProfilePackageApi();
   return parseJson<BrowserProfilePackagePayload>(
-    api.decode_bfprofile_package(packageText, password),
+    api.decode_bfprofile_package(packageText, password.expose()),
     'bfprofile payload',
   );
 }
 
-export async function createProfilePackagePair(payload: BrowserProfilePackagePayload, password: string) {
+export async function createProfilePackagePair(payload: BrowserProfilePackagePayload, password: Passphrase) {
   const api = await getWasmProfilePackageApi();
   return parseJson<BrowserProfilePackagePair>(
-    api.create_profile_package_pair(JSON.stringify(payload), password),
+    api.create_profile_package_pair(JSON.stringify(payload), password.expose()),
     'profile package pair',
   );
 }

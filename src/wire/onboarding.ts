@@ -9,10 +9,13 @@
  * changed; only the declarations moved.
  */
 
+import type { ShareSecretHex } from '../secret';
 import type { GroupPackageWire } from './runtime';
 
 export type OnboardingDecoded = {
-  share_secret: string;
+  // The decoded share secret is the crown-jewel onboarding secret; hold it wrapped
+  // (redacted on accidental log, greppable `.expose()`) as it flows to the WASM calls.
+  share_secret: ShareSecretHex;
   share_pubkey32: string;
   peer_pk_xonly: string;
   relays: string[];

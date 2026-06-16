@@ -21,6 +21,7 @@ import {
 } from './bridge-wasm-runtime';
 import { decodeBfOnboardPackage } from './profile-package';
 import { RuntimeReadinessTimeoutError } from './errors';
+import { Secret } from './secret';
 import { normalizeNip44PayloadForJs } from './nip44-normalize';
 import {
   normalizeSignerSettings,
@@ -488,7 +489,7 @@ export class BrowserBridgeNode {
       try {
         onboardingSnapshotJson = onboardingApi.build_onboarding_runtime_snapshot(
           JSON.stringify(group),
-          decoded!.share_secret,
+          decoded!.share_secret.expose(),
           bootstrapPeer,
           JSON.stringify(onboardResponse.nonces),
           onboardRequest.bootstrap_state_hex
@@ -949,7 +950,7 @@ export class BrowserBridgeNode {
   }
 
   private async decodeOnboardingPackage(value: string, password: string): Promise<OnboardingDecoded> {
-    const decoded = await decodeBfOnboardPackage(value.trim(), password);
+    const decoded = await decodeBfOnboardPackage(value.trim(), Secret.of(password));
     const shareSecret = decoded.shareSecret;
     const peerPubkey = decoded.peerPubkey;
     const relays = decoded.relays;
@@ -963,7 +964,7 @@ export class BrowserBridgeNode {
     }
 
     return {
-      share_secret: shareSecret,
+      share_secret: Secret.of(shareSecret),
       share_pubkey32: sharePubkey32,
       peer_pk_xonly: peerPubkey,
       relays: Array.isArray(relays)
@@ -1084,7 +1085,7 @@ export class BrowserBridgeNode {
     if (bootstrapPeerPubkey) {
       try {
         const result = await this.requestOnboardResponse({
-          share_secret: profileBootstrap.shareSecret,
+          share_secret: Secret.of(profileBootstrap.shareSecret),
           share_pubkey32: this.localSharePubkey32,
           peer_pk_xonly: bootstrapPeerPubkey,
           relays: this.activeRelays
@@ -1179,11 +1180,11 @@ export class BrowserBridgeNode {
     if (!this.pool) throw new Error('relay pool not initialized');
 
     const now = nowUnixSecs();
-    const shareSecret = hexToBytes(decoded.share_secret);
+    const shareSecret = hexToBytes(decoded.share_secret.expose());
     const onboardingApi = await getWasmBridgeOnboardingApi();
     const bundle = parseOnboardingRequestBundle(
       onboardingApi.create_onboarding_request_bundle(
-        decoded.share_secret,
+        decoded.share_secret.expose(),
         decoded.peer_pk_xonly.toLowerCase(),
         BIFROST_EVENT_KIND,
         now

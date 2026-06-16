@@ -1,6 +1,7 @@
 import { createBrowserProfilePreview } from '../browser-profile/core';
 import { runtimePayloadFromSnapshot } from '../browser-profile/runtime-session';
 import { createProfilePackagePair, type BrowserProfilePackagePayload } from '../profile-package';
+import { Secret } from '../secret';
 import type {
   BrowserConnectedProfileInput,
   BrowserOnboardingConnection,
@@ -31,7 +32,7 @@ export async function createBrowserOnboardingConnection(args: {
     relays: args.relays,
     runtimeSnapshotJson: args.runtimeSnapshotJson,
   });
-  const packagePair = await createProfilePackagePair(profilePayload, args.password);
+  const packagePair = await createProfilePackagePair(profilePayload, Secret.of(args.password));
 
   return {
     preview: createBrowserProfilePreview(profilePayload, 'bfonboard'),

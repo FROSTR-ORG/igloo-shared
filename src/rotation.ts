@@ -1,6 +1,7 @@
 import { nip19 } from 'nostr-tools';
 
 import { getWasmKeysetApi } from './bridge-wasm-runtime';
+import { Secret } from './secret';
 import {
   normalizeHex32,
   publicKeyFromSecret,
@@ -212,7 +213,7 @@ export async function buildRotationDistributionArtifact(input: {
       relays: payload.device.relays,
       peerPubkey,
     } satisfies BrowserOnboardPackagePayload,
-    input.packagePassword,
+    Secret.of(input.packagePassword),
   );
   return {
     memberIndex: input.assignment.memberIndex,

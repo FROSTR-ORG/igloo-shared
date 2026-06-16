@@ -49,7 +49,9 @@ describe('browser-profile-persistence helpers', () => {
     expect(bundle.profileString).toBe('bfprofile1saved');
     expect(bundle.shareString).toBe('bfshare1saved');
     expect(bundle.projection.summary.id).toBe('profile-1');
-    expect(createProfilePackagePair).toHaveBeenCalledWith(payload, 'secret');
+    const calls = createProfilePackagePair.mock.calls as unknown as unknown[][];
+    expect(calls[0]![0]).toEqual(payload);
+    expect((calls[0]![1] as { expose: () => string }).expose()).toBe('secret');
   });
 
   test('rejects duplicate profile ids before returning the bundle', async () => {

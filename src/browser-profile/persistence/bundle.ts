@@ -4,6 +4,7 @@ import {
   type BrowserProfilePackagePayload,
 } from '../../profile-package';
 import { DEFAULT_SIGNER_SETTINGS, type SignerSettings } from '../../signer-settings';
+import { Secret } from '../../secret';
 import type { BrowserProfileSource } from '../core';
 import { assertBrowserProfileIdAvailable } from './duplicate';
 import type { BrowserPersistedProfileBundle } from './types';
@@ -35,7 +36,7 @@ export async function createBrowserPersistedProfileBundle(args: {
     label: projection.preview.label,
   });
 
-  const packagePair = await createProfilePackagePair(args.payload, args.password);
+  const packagePair = await createProfilePackagePair(args.payload, Secret.of(args.password));
 
   return {
     projection,
