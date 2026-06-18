@@ -332,3 +332,7 @@ export type {
 // --- signer-settings ---
 export { DEFAULT_SIGNER_SETTINGS, normalizeSignerSettings } from './signer-settings';
 export type { PeerSelectionStrategy, SignerSettings } from './signer-settings';
+
+// --- persist-contract ---
+export { PERSISTABLE_PROFILE_KEYS } from './persist-contract';
+export type { PersistableStoredProfile, ProfileSource } from './persist-contract';
