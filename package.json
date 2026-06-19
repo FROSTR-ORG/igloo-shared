@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./testing/setup-dom": "./src/testing/setup-dom.ts",
-    "./testing/vitest-base": "./src/testing/vitest-base.ts"
+    "./testing/vitest-base": "./src/testing/vitest-base.ts",
+    "./testing/dev-fixtures": "./src/testing/dev-fixtures.ts"
   },
   "scripts": {
     "build:browser-wasm": "./scripts/build-bridge-wasm.sh",
