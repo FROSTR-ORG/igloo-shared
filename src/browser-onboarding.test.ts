@@ -1,10 +1,20 @@
 import { describe, expect, test, vi } from 'vitest';
 
-const { createProfilePackagePair, runtimePayloadFromSnapshot } = vi.hoisted(() => ({
+const {
+  createProfilePackagePair,
+  decodeBfSharePackage,
+  encodeBfOnboardPackage,
+  runtimePayloadFromSnapshot,
+} = vi.hoisted(() => ({
   createProfilePackagePair: vi.fn(async () => ({
     profileString: 'bfprofile1connected',
     shareString: 'bfshare1connected',
   })),
+  decodeBfSharePackage: vi.fn(async () => ({
+    shareSecret: '44'.repeat(32),
+    relays: ['wss://source-relay.example'],
+  })),
+  encodeBfOnboardPackage: vi.fn(async () => 'bfonboard1sponsored'),
   runtimePayloadFromSnapshot: vi.fn(async () => ({
     profileId: 'connected-profile',
     version: 1,
@@ -28,6 +38,8 @@ vi.mock('./profile-package', async () => {
   return {
     ...actual,
     createProfilePackagePair,
+    decodeBfSharePackage,
+    encodeBfOnboardPackage,
   };
 });
 
@@ -41,8 +53,11 @@ vi.mock('./browser-profile/runtime-session', async () => {
 
 import {
   createBrowserOnboardingConnection,
+  createBrowserOnboardSponsorshipPackage,
+  createBrowserOnboardSponsorshipPackageFromBfshare,
   finalizeConnectedBrowserProfile,
   finalizeRotatedBrowserProfile,
+  getBrowserOnboardSponsorshipReadiness,
   publicKeyFromSecret,
 } from './index';
 
@@ -120,5 +135,194 @@ describe('browser-onboarding helpers', () => {
 
     expect(finalized.preview.label).toBe('Primary Browser Device');
     expect(finalized.summary.id).toBe('connected-profile');
+  });
+
+  test('reports saved-profile sponsorship as unavailable without a package producer', () => {
+    expect(getBrowserOnboardSponsorshipReadiness()).toEqual({
+      available: false,
+      reason: 'saved-profile-local-share-only',
+      missing: 'remote-share-package-producer',
+      securityBoundary: 'saved-browser-profiles-retain-local-share-only',
+      requiredSource: 'nsec-or-threshold-source-shares',
+      safeActions: [
+        'export-local-share-as-source',
+        'use-create-or-rotate-before-setup-finishes',
+        'replace-share-from-prepared-package',
+      ],
+    });
+  });
+
+  test('reports sponsorship as available only with a package producer', () => {
+    expect(
+      getBrowserOnboardSponsorshipReadiness({
+        packageProducerAvailable: true,
+      }),
+    ).toEqual({
+      available: true,
+      mode: 'package-producer',
+      requiredSource: 'package-producer',
+      safeActions: ['configure-device'],
+    });
+  });
+
+  test('keeps the first-draft runtime package producer flag as a compatibility alias', () => {
+    expect(
+      getBrowserOnboardSponsorshipReadiness({
+        runtimePackageProducerAvailable: true,
+      }),
+    ).toEqual({
+      available: true,
+      mode: 'package-producer',
+      requiredSource: 'package-producer',
+      safeActions: ['configure-device'],
+    });
+  });
+
+  test('reports sponsorship as available with explicit source-share package material', () => {
+    expect(
+      getBrowserOnboardSponsorshipReadiness({
+        sourceSharePackageProducerAvailable: true,
+      }),
+    ).toEqual({
+      available: true,
+      mode: 'source-share-package-producer',
+      requiredSource: 'nsec-or-threshold-source-shares',
+      safeActions: ['configure-device'],
+    });
+  });
+
+  test('creates a sponsorship package from explicit remote share source material', async () => {
+    const shareSecret = '44'.repeat(32);
+    const sharePubkey = publicKeyFromSecret(shareSecret);
+
+    const result = await createBrowserOnboardSponsorshipPackage({
+      label: '  Remote Device  ',
+      groupPackage: {
+        groupName: 'My Signing Key',
+        groupPk: '22'.repeat(32),
+        threshold: 2,
+        members: [{ idx: 2, pubkey: `02${sharePubkey}` }],
+      },
+      memberIdx: 2,
+      shareSecret,
+      relays: [' wss://relay.primal.net/ '],
+      peerPubkey: 'aa'.repeat(32),
+      password: 'package-pass',
+    });
+
+    const onboardCalls = encodeBfOnboardPackage.mock.calls as unknown as unknown[][];
+    const onboardCall = onboardCalls[onboardCalls.length - 1]!;
+    expect(onboardCall[0]).toEqual({
+      shareSecret,
+      relays: ['wss://relay.primal.net'],
+      peerPubkey: 'aa'.repeat(32),
+    });
+    expect((onboardCall[1] as { expose: () => string }).expose()).toBe('package-pass');
+    expect(result).toEqual(
+      expect.objectContaining({
+        memberIdx: 2,
+        label: 'Remote Device',
+        packageText: 'bfonboard1sponsored',
+      }),
+    );
+    expect(result.preview).toEqual(
+      expect.objectContaining({
+        label: 'Remote Device',
+        share_public_key: sharePubkey,
+        group_public_key: '22'.repeat(32),
+        relays: ['wss://relay.primal.net'],
+        source: 'bfonboard',
+      }),
+    );
+    expect(JSON.parse(result.preview.share_package_json)).toEqual({
+      idx: 2,
+      seckey: shareSecret,
+    });
+    expect(JSON.parse(result.preview.group_package_json)).toEqual(
+      expect.objectContaining({
+        group_name: 'My Signing Key',
+        group_pk: '22'.repeat(32),
+        threshold: 2,
+      }),
+    );
+  });
+
+  test('rejects sponsorship when the source share does not match the target group member', async () => {
+    await expect(
+      createBrowserOnboardSponsorshipPackage({
+        label: 'Remote Device',
+        groupPackage: {
+          groupName: 'My Signing Key',
+          groupPk: '22'.repeat(32),
+          threshold: 2,
+          members: [{ idx: 2, pubkey: `02${publicKeyFromSecret('55'.repeat(32))}` }],
+        },
+        memberIdx: 2,
+        shareSecret: '44'.repeat(32),
+        relays: ['wss://relay.primal.net'],
+        peerPubkey: 'aa'.repeat(32),
+        password: 'package-pass',
+      }),
+    ).rejects.toThrow('Sponsorship share does not match member #2');
+  });
+
+  test('creates a sponsorship package by decoding explicit bfshare source material', async () => {
+    const shareSecret = '44'.repeat(32);
+    const sharePubkey = publicKeyFromSecret(shareSecret);
+
+    const result = await createBrowserOnboardSponsorshipPackageFromBfshare({
+      label: 'Remote Device',
+      groupPackage: {
+        groupName: 'My Signing Key',
+        groupPk: '22'.repeat(32),
+        threshold: 2,
+        members: [
+          { idx: 1, pubkey: `02${publicKeyFromSecret('11'.repeat(32))}` },
+          { idx: 2, pubkey: `02${sharePubkey}` },
+        ],
+      },
+      sourcePackageText: '  bfshare1remote  ',
+      sourcePackagePassword: 'source-pass',
+      relays: ['wss://relay.primal.net'],
+      peerPubkey: 'aa'.repeat(32),
+      password: 'package-pass',
+    });
+
+    const shareCalls = decodeBfSharePackage.mock.calls as unknown as unknown[][];
+    expect(shareCalls[0]![0]).toBe('bfshare1remote');
+    expect((shareCalls[0]![1] as { expose: () => string }).expose()).toBe('source-pass');
+    const onboardCalls = encodeBfOnboardPackage.mock.calls as unknown as unknown[][];
+    const onboardCall = onboardCalls[onboardCalls.length - 1]!;
+    expect(onboardCall[0]).toEqual({
+      shareSecret,
+      relays: ['wss://relay.primal.net'],
+      peerPubkey: 'aa'.repeat(32),
+    });
+    expect((onboardCall[1] as { expose: () => string }).expose()).toBe('package-pass');
+    expect(result.memberIdx).toBe(2);
+    expect(result.preview.share_public_key).toBe(sharePubkey);
+    expect(JSON.parse(result.preview.share_package_json)).toEqual({
+      idx: 2,
+      seckey: shareSecret,
+    });
+  });
+
+  test('rejects a bfshare source that does not belong to the selected keyset', async () => {
+    await expect(
+      createBrowserOnboardSponsorshipPackageFromBfshare({
+        label: 'Remote Device',
+        groupPackage: {
+          groupName: 'My Signing Key',
+          groupPk: '22'.repeat(32),
+          threshold: 2,
+          members: [{ idx: 2, pubkey: `02${publicKeyFromSecret('55'.repeat(32))}` }],
+        },
+        sourcePackageText: 'bfshare1remote',
+        sourcePackagePassword: 'source-pass',
+        relays: ['wss://relay.primal.net'],
+        peerPubkey: 'aa'.repeat(32),
+        password: 'package-pass',
+      }),
+    ).rejects.toThrow('Source bfshare does not match any member in this keyset.');
   });
 });

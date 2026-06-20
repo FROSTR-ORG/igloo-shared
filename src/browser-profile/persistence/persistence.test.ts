@@ -1,10 +1,14 @@
 import { describe, expect, test, vi } from 'vitest';
 
-const { createProfilePackagePair } = vi.hoisted(() => ({
+const {
+  createProfilePackagePair,
+  decodeBfProfilePackage,
+} = vi.hoisted(() => ({
   createProfilePackagePair: vi.fn(async () => ({
     profileString: 'bfprofile1saved',
     shareString: 'bfshare1saved',
   })),
+  decodeBfProfilePackage: vi.fn(async () => ({} as any)),
 }));
 
 vi.mock('../../profile-package', async () => {
@@ -12,10 +16,12 @@ vi.mock('../../profile-package', async () => {
   return {
     ...actual,
     createProfilePackagePair,
+    decodeBfProfilePackage,
   };
 });
 
 import {
+  changeBrowserProfilePackagePassword,
   createBrowserPersistedProfileBundle,
   createFinalizedBrowserStoredProfile,
   publicKeyFromSecret,
@@ -52,6 +58,75 @@ describe('browser-profile-persistence helpers', () => {
     const calls = createProfilePackagePair.mock.calls as unknown as unknown[][];
     expect(calls[0]![0]).toEqual(payload);
     expect((calls[0]![1] as { expose: () => string }).expose()).toBe('secret');
+  });
+
+  test('changes a browser profile package password while preserving host-local metadata', async () => {
+    const payload = {
+      profileId: 'profile-rekey',
+      version: 1,
+      device: {
+        name: 'Old Device',
+        shareSecret: '11'.repeat(32),
+        manualPeerPolicyOverrides: [],
+        relays: ['ws://old-relay'],
+      },
+      groupPackage: {
+        groupName: 'Saved Group',
+        groupPk: '22'.repeat(32),
+        threshold: 2,
+        members: [{ idx: 1, pubkey: `02${publicKeyFromSecret('11'.repeat(32))}` }],
+      },
+    };
+    decodeBfProfilePackage.mockResolvedValueOnce(payload);
+
+    const result = await changeBrowserProfilePackagePassword({
+      profileString: 'bfprofile1old',
+      currentPassword: 'old-secret',
+      nextPassword: 'new-secret',
+      label: 'Current Device',
+      relays: ['ws://relay-1', 'ws://relay-2'],
+      manualPeerPolicyOverrides: [
+        {
+          pubkey: 'peer-1',
+          policy: {
+            request: { echo: 'unset', ping: 'allow', onboard: 'unset', sign: 'unset', ecdh: 'unset' },
+            respond: { echo: 'unset', ping: 'unset', onboard: 'deny', sign: 'unset', ecdh: 'unset' },
+          },
+        },
+      ],
+    });
+
+    const decodeCalls = decodeBfProfilePackage.mock.calls as unknown as unknown[][];
+    expect(decodeCalls[0]![0]).toBe('bfprofile1old');
+    expect((decodeCalls[0]![1] as { expose: () => string }).expose()).toBe('old-secret');
+    const calls = createProfilePackagePair.mock.calls as unknown as unknown[][];
+    const lastCall = calls[calls.length - 1]!;
+    expect(lastCall[0]).toEqual(
+      expect.objectContaining({
+        profileId: 'profile-rekey',
+        device: expect.objectContaining({
+          name: 'Current Device',
+          relays: ['ws://relay-1', 'ws://relay-2'],
+          manualPeerPolicyOverrides: [
+            expect.objectContaining({
+              pubkey: 'peer-1',
+              policy: expect.objectContaining({
+                request: expect.objectContaining({ ping: 'allow' }),
+                respond: expect.objectContaining({ onboard: 'deny' }),
+              }),
+            }),
+          ],
+        }),
+      }),
+    );
+    expect((lastCall[1] as { expose: () => string }).expose()).toBe('new-secret');
+    expect(result).toEqual({
+      payload: expect.objectContaining({
+        device: expect.objectContaining({ name: 'Current Device' }),
+      }),
+      profileString: 'bfprofile1saved',
+      shareString: 'bfshare1saved',
+    });
   });
 
   test('rejects duplicate profile ids before returning the bundle', async () => {

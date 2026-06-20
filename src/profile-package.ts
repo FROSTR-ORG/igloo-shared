@@ -142,6 +142,60 @@ export function groupPackageToWireJson(groupPackage: BrowserGroupPackage) {
   return JSON.stringify(groupPackageToWireValue(groupPackage), null, 2);
 }
 
+function readString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readInteger(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+/**
+ * Parse a stored group-package wire JSON (the snake_case shape produced by
+ * {@link groupPackageToWireJson}, persisted on profiles as `group_package_json`)
+ * back into a {@link BrowserGroupPackage}. Accepts the camelCase in-memory
+ * shape too so older local profile records remain recoverable.
+ */
+export function groupPackageFromWireJson(value: string): BrowserGroupPackage {
+  const parsed = parseJson<{
+    group_name?: unknown;
+    groupName?: unknown;
+    group_pk?: unknown;
+    groupPk?: unknown;
+    threshold?: unknown;
+    members?: unknown;
+  }>(value, 'group package');
+
+  const groupName = readString(parsed.group_name) || readString(parsed.groupName);
+  const groupPk = (readString(parsed.group_pk) || readString(parsed.groupPk)).toLowerCase();
+  const threshold = readInteger(parsed.threshold);
+  if (!groupName || !groupPk || threshold <= 0 || !Array.isArray(parsed.members)) {
+    throw new Error('Invalid group package.');
+  }
+
+  const members = parsed.members.map((entry): BrowserGroupPackageMember => {
+    const member = entry && typeof entry === 'object' ? (entry as { idx?: unknown; pubkey?: unknown }) : {};
+    const idx = readInteger(member.idx);
+    const pubkey = readString(member.pubkey).toLowerCase();
+    if (idx < 0 || !pubkey) {
+      throw new Error('Invalid group package member.');
+    }
+    return { idx, pubkey };
+  });
+
+  return {
+    groupName,
+    groupPk,
+    threshold,
+    members,
+  };
+}
+
 export function sharePackageToWireValue(memberIdx: number, shareSecret: string) {
   return {
     idx: memberIdx,
@@ -151,41 +205,6 @@ export function sharePackageToWireValue(memberIdx: number, shareSecret: string) 
 
 export function sharePackageToWireJson(memberIdx: number, shareSecret: string) {
   return JSON.stringify(sharePackageToWireValue(memberIdx, shareSecret), null, 2);
-}
-
-/**
- * Parse a stored group-package wire JSON (the snake_case shape produced by
- * {@link groupPackageToWireJson}, persisted on profiles as `group_package_json`)
- * back into a {@link BrowserGroupPackage}. Used by recovery/rotation to recover
- * the group context locally instead of fetching it from a relay.
- */
-export function groupPackageFromWireJson(json: string): BrowserGroupPackage {
-  const wire = parseJson<{
-    group_name?: unknown;
-    group_pk?: unknown;
-    threshold?: unknown;
-    members?: unknown;
-  }>(json, 'group package');
-  if (
-    typeof wire.group_name !== 'string' ||
-    typeof wire.group_pk !== 'string' ||
-    typeof wire.threshold !== 'number' ||
-    !Array.isArray(wire.members)
-  ) {
-    throw new Error('Invalid group package.');
-  }
-  return {
-    groupName: wire.group_name,
-    groupPk: wire.group_pk,
-    threshold: wire.threshold,
-    members: wire.members.map((member) => {
-      const entry = member as { idx?: unknown; pubkey?: unknown };
-      if (typeof entry.idx !== 'number' || typeof entry.pubkey !== 'string') {
-        throw new Error('Invalid group package member.');
-      }
-      return { idx: entry.idx, pubkey: entry.pubkey };
-    }),
-  };
 }
 
 // The package password is a `Passphrase` (redacted on log, greppable `.expose()`),
