@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 const {
   createProfilePackagePair,
+  decodeBfProfilePackage,
   createEncryptedProfileBackup,
   publishEncryptedProfileBackup,
 } = vi.hoisted(() => ({
@@ -9,6 +10,7 @@ const {
     profileString: 'bfprofile1saved',
     shareString: 'bfshare1saved',
   })),
+  decodeBfProfilePackage: vi.fn(async () => ({} as any)),
   createEncryptedProfileBackup: vi.fn(async () => ({ version: 1, device: { name: 'Saved Device' } })),
   publishEncryptedProfileBackup: vi.fn(async () => ({ id: 'backup-event' })),
 }));
@@ -18,6 +20,7 @@ vi.mock('../../profile-package', async () => {
   return {
     ...actual,
     createProfilePackagePair,
+    decodeBfProfilePackage,
     createEncryptedProfileBackup,
   };
 });
@@ -27,6 +30,7 @@ vi.mock('../../profile-backup-host', () => ({
 }));
 
 import {
+  changeBrowserProfilePackagePassword,
   createBrowserPersistedProfileBundle,
   createFinalizedBrowserStoredProfile,
   publicKeyFromSecret,
@@ -66,6 +70,71 @@ describe('browser-profile-persistence helpers', () => {
       relays: ['ws://relay-1'],
       shareSecret: '11'.repeat(32),
       backup: { version: 1, device: { name: 'Saved Device' } },
+    });
+  });
+
+  test('changes a browser profile package password while preserving host-local metadata', async () => {
+    const payload = {
+      profileId: 'profile-rekey',
+      version: 1,
+      device: {
+        name: 'Old Device',
+        shareSecret: '11'.repeat(32),
+        manualPeerPolicyOverrides: [],
+        relays: ['ws://old-relay'],
+      },
+      groupPackage: {
+        groupName: 'Saved Group',
+        groupPk: '22'.repeat(32),
+        threshold: 2,
+        members: [{ idx: 1, pubkey: `02${publicKeyFromSecret('11'.repeat(32))}` }],
+      },
+    };
+    decodeBfProfilePackage.mockResolvedValueOnce(payload);
+
+    const result = await changeBrowserProfilePackagePassword({
+      profileString: 'bfprofile1old',
+      currentPassword: 'old-secret',
+      nextPassword: 'new-secret',
+      label: 'Current Device',
+      relays: ['ws://relay-1', 'ws://relay-2'],
+      manualPeerPolicyOverrides: [
+        {
+          pubkey: 'peer-1',
+          policy: {
+            request: { echo: 'unset', ping: 'allow', onboard: 'unset', sign: 'unset', ecdh: 'unset' },
+            respond: { echo: 'unset', ping: 'unset', onboard: 'deny', sign: 'unset', ecdh: 'unset' },
+          },
+        },
+      ],
+    });
+
+    expect(decodeBfProfilePackage).toHaveBeenCalledWith('bfprofile1old', 'old-secret');
+    expect(createProfilePackagePair).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        profileId: 'profile-rekey',
+        device: expect.objectContaining({
+          name: 'Current Device',
+          relays: ['ws://relay-1', 'ws://relay-2'],
+          manualPeerPolicyOverrides: [
+            expect.objectContaining({
+              pubkey: 'peer-1',
+              policy: expect.objectContaining({
+                request: expect.objectContaining({ ping: 'allow' }),
+                respond: expect.objectContaining({ onboard: 'deny' }),
+              }),
+            }),
+          ],
+        }),
+      }),
+      'new-secret',
+    );
+    expect(result).toEqual({
+      payload: expect.objectContaining({
+        device: expect.objectContaining({ name: 'Current Device' }),
+      }),
+      profileString: 'bfprofile1saved',
+      shareString: 'bfshare1saved',
     });
   });
 

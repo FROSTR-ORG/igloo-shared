@@ -72,15 +72,23 @@ export type { EventSchema } from './observability-schema';
 // --- browser-onboarding ---
 export {
   createBrowserOnboardingConnection,
+  createBrowserOnboardSponsorshipPackage,
+  createBrowserOnboardSponsorshipPackageFromBfshare,
   createConnectedBrowserProfilePayload,
   finalizeConnectedBrowserProfile,
   finalizeRotatedBrowserProfile,
+  getBrowserOnboardSponsorshipReadiness,
   prepareBrowserRotationProfilePayload,
 } from './browser-onboarding';
 export type {
   BrowserConnectedProfileFinalizeArgs,
   BrowserConnectedProfileFinalizeResult,
   BrowserConnectedProfileInput,
+  BrowserOnboardSponsorshipInput,
+  BrowserOnboardSponsorshipPackageRequest,
+  BrowserOnboardSponsorshipPackageResult,
+  BrowserOnboardSponsorshipReadiness,
+  BrowserOnboardSponsorshipSourceShareRequest,
   BrowserOnboardingConnection,
   BrowserRotationProfileFinalizeArgs,
   BrowserRotationProfileTarget,
@@ -109,12 +117,14 @@ export type {
 // --- browser-profile-persistence ---
 export {
   assertBrowserProfileIdAvailable,
+  changeBrowserProfilePackagePassword,
   createBrowserPersistedProfileBundle,
   duplicateBrowserProfileMessage,
   publishBrowserProfileBackup,
 } from './browser-profile/persistence';
 export type {
   BrowserDuplicateProfileInput,
+  BrowserProfilePasswordChangeResult,
   BrowserPersistedProfileBundle,
 } from './browser-profile/persistence';
 
@@ -300,6 +310,7 @@ export {
   encryptProfileBackupContent,
   getProfileBackupEventKind,
   groupNameFromPackage,
+  groupPackageFromWireJson,
   groupPackageToWireJson,
   groupPackageToWireValue,
   groupPublicKeyFromPackage,

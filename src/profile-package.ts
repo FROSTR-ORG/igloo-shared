@@ -171,6 +171,57 @@ export function groupPackageToWireJson(groupPackage: BrowserGroupPackage) {
   return JSON.stringify(groupPackageToWireValue(groupPackage), null, 2);
 }
 
+function readString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readInteger(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+export function groupPackageFromWireJson(value: string): BrowserGroupPackage {
+  const parsed = parseJson<{
+    group_name?: unknown;
+    groupName?: unknown;
+    group_pk?: unknown;
+    groupPk?: unknown;
+    threshold?: unknown;
+    members?: unknown;
+  }>(value, 'group package');
+
+  const groupName = readString(parsed.group_name) || readString(parsed.groupName);
+  const groupPk = (readString(parsed.group_pk) || readString(parsed.groupPk)).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(groupPk)) {
+    throw new Error('Invalid group package.');
+  }
+
+  const members = Array.isArray(parsed.members)
+    ? parsed.members.map((entry): BrowserGroupPackageMember => {
+        const member = entry && typeof entry === 'object' ? entry as { idx?: unknown; pubkey?: unknown } : {};
+        const pubkey = readString(member.pubkey).toLowerCase();
+        if (!pubkey) {
+          throw new Error('Invalid group package.');
+        }
+        return {
+          idx: readInteger(member.idx),
+          pubkey,
+        };
+      })
+    : [];
+
+  return {
+    groupName,
+    groupPk,
+    threshold: readInteger(parsed.threshold),
+    members,
+  };
+}
+
 export function sharePackageToWireValue(memberIdx: number, shareSecret: string) {
   return {
     idx: memberIdx,
