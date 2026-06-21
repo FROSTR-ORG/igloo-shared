@@ -78,16 +78,15 @@ instead of guessing from a snapshot.
 ### Package flows
 
 Package encode/decode and recovery use the profile-package and rotation
-helpers (canonical crypto lives in the `frostr-utils` crate; the envelope and
-package formats are specified in the shared-system `CRYPTOGRAPHY.md` and
-`BACKUP.md` manuals):
+helpers (canonical crypto lives in the `bifrost-rs` signing core; the envelope
+and package formats are specified in the shared-system `CRYPTOGRAPHY.md` manual):
 
 - **Onboarding** — `decodeOnboardingProfile(bfonboard, password)` →
   `createSignerNode({ mode: 'onboarding', ... })`.
 - **Profile import** — `decodeBfProfilePackage(bfprofile, password)` →
   `createSignerNode({ mode: 'profile', ... })`.
-- **Recovery** — `recoverProfileFromSharePackage(...)` reconstructs a profile
-  from a `bfshare` plus the relay backup.
+- **Recovery** — `recoverSecretKeyFromShares(...)` reconstructs the signing key
+  from a threshold of `bfshare` inputs (no relay backup).
 - **Rotation** — the `rotation` helpers reconstruct the signing key from a
   threshold of `bfshare` inputs and split fresh shares (same group key).
 - **Signing** — once connected, `prepareSignOnNode` then `signNostrEvent`.
