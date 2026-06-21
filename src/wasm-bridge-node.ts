@@ -409,9 +409,15 @@ export class BrowserBridgeNode {
       relays: this.activeRelays
     });
 
+    // `enableReconnect` is not in nostr-tools' published SimplePool ctor type;
+    // `as never` passes the runtime option through that type gap.
     this.pool = new SimplePool({ enableReconnect: true } as never);
 
     const signerSettings = normalizeSignerSettings(this.config.signerSettings);
+    // Fields read from signerSettings are operator-tunable; the bare numeric
+    // literals below are host-fixed runtime tuning not exposed in settings —
+    // timeouts in seconds (ecdh/onboard/max_future_skew are all 30s), the
+    // request cache size, and the ECDH/signature cache capacities + TTLs.
     const runtimeConfig = {
       device: {
         sign_timeout_secs: signerSettings.sign_timeout_secs,
