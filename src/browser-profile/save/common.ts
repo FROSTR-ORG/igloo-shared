@@ -1,4 +1,5 @@
 import { createLogger } from '../../observability';
+import { toErrorMessage } from '../../runtime-internal';
 import {
   completeBrowserProfileSave,
   type BrowserProfileSaveResult,
@@ -10,14 +11,6 @@ import type {
 } from './types';
 
 const logger = createLogger('browser.profile-save');
-
-function toErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message.trim()
-    ? error.message
-    : typeof error === 'string' && error.trim()
-      ? error
-      : fallback;
-}
 
 export async function saveBrowserProfileAndMaybeActivate<TProfile, TRuntime>(args: {
   profile: TProfile;

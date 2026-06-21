@@ -102,6 +102,7 @@ export {
   publicKeyFromSecret,
   shareJsonFromPayload,
 } from './browser-profile/core';
+export { toErrorMessage } from './runtime-internal';
 export type {
   BrowserProfileArtifactRefs,
   BrowserProfilePreview,
