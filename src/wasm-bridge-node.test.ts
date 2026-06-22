@@ -185,3 +185,104 @@ describe('relay-health visibility back-off', () => {
     }
   });
 });
+
+describe('bridge-command failure drain (R6.5)', () => {
+  // `runBridgeCommand` registers a pending sign/ecdh op, then `pumpRuntime`
+  // drains a matching failure from the runtime and must reject that pending
+  // promise (a drained failure binds to the FIFO head of its kind — see
+  // `matchBridgeCompletion`). These are the sign/ecdh reject paths that
+  // `signNostrEvent` / `nip44Encrypt` / `nip44Decrypt` all funnel through.
+  type CmdInternals = {
+    runtime: unknown;
+    pendingCommandState: {
+      commands: Map<string, unknown>;
+      kindFifo: { sign: string[]; ecdh: string[] };
+    };
+    runBridgeCommand: (
+      kind: 'sign' | 'ecdh',
+      command: Record<string, unknown>,
+    ) => Promise<string>;
+  };
+
+  // A runtime whose drain surfaces exactly one failure for `opType`. The
+  // request_id need not match the TS-side UUID — the failure binds to the
+  // oldest pending op of its kind.
+  function failingRuntime(opType: 'sign' | 'ecdh', message: string) {
+    return {
+      tick: () => {},
+      handle_command: () => {},
+      drain_runtime_events: () => '[]',
+      drain_outbound_events: () => '[]',
+      drain_completions: () => '[]',
+      drain_failures: () =>
+        JSON.stringify([{ op_type: opType, message, request_id: 'wasm-req-1' }]),
+    };
+  }
+
+  test('a drained sign failure rejects the pending sign and clears pending state', async () => {
+    const node = new BrowserBridgeNode(baseConfig);
+    const internals = node as unknown as CmdInternals;
+    internals.runtime = failingRuntime('sign', 'signer refused the request') as never;
+
+    await expect(
+      internals.runBridgeCommand('sign', { type: 'sign', message_hex_32: 'aa'.repeat(32) }),
+    ).rejects.toThrow('signer refused the request');
+
+    // No orphaned pending entry / FIFO tombstone left behind.
+    expect(internals.pendingCommandState.commands.size).toBe(0);
+    expect(internals.pendingCommandState.kindFifo.sign).toHaveLength(0);
+  });
+
+  test('a drained ecdh failure rejects the pending ecdh op', async () => {
+    const node = new BrowserBridgeNode(baseConfig);
+    const internals = node as unknown as CmdInternals;
+    internals.runtime = failingRuntime('ecdh', 'ecdh peer unavailable') as never;
+
+    await expect(
+      internals.runBridgeCommand('ecdh', { type: 'ecdh', pubkey32_hex: 'bb'.repeat(32) }),
+    ).rejects.toThrow('ecdh peer unavailable');
+    expect(internals.pendingCommandState.commands.size).toBe(0);
+    expect(internals.pendingCommandState.kindFifo.ecdh).toHaveLength(0);
+  });
+});
+
+describe('signNostrEvent verification guard (R6.5)', () => {
+  test('throws when the assembled event fails signature verification', async () => {
+    const node = new BrowserBridgeNode(baseConfig);
+    const internals = node as unknown as { runtime: unknown; groupPubkey32: string };
+
+    // A valid x-only pubkey (the secp256k1 generator x-coord) so getPublicKey()
+    // and getEventHash() succeed; the signature drained below is bogus, so
+    // verifyEvent() must reject the assembled event.
+    internals.groupPubkey32 =
+      '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
+    const readyStatus = JSON.stringify({
+      readiness: {
+        sign_ready: true,
+        ecdh_ready: true,
+        restore_complete: true,
+        last_refresh_at: Math.floor(Date.now() / 1000) + 60,
+        degraded_reasons: [],
+        threshold: 2,
+        signing_peer_count: 2,
+        ecdh_peer_count: 2,
+      },
+    });
+    internals.runtime = {
+      tick: () => {},
+      handle_command: () => {},
+      runtime_status: () => readyStatus,
+      drain_runtime_events: () => '[]',
+      drain_outbound_events: () => '[]',
+      drain_completions: () =>
+        JSON.stringify([
+          { Sign: { request_id: 'wasm-sign-1', signatures_hex64: ['ab'.repeat(64)] } },
+        ]),
+      drain_failures: () => '[]',
+    } as never;
+
+    await expect(
+      node.signNostrEvent({ kind: 1, content: 'hello', tags: [], created_at: 1700000000 }),
+    ).rejects.toThrow('Signed event failed verification');
+  });
+});
