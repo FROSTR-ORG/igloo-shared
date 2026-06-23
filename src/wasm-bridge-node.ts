@@ -23,10 +23,7 @@ import { decodeBfOnboardPackage } from './profile-package';
 import { RuntimeReadinessTimeoutError } from './errors';
 import { Secret } from './secret';
 import { normalizeNip44PayloadForJs } from './nip44-normalize';
-import {
-  normalizeSignerSettings,
-  type SignerSettings
-} from './signer-settings';
+import { normalizeSignerSettings, type SignerSettings } from './signer-settings';
 import {
   BIFROST_EVENT_KIND,
   ONBOARD_TIMEOUT_MS,
@@ -44,7 +41,6 @@ import {
   toErrorMessage,
   withContext,
   normalizePubkey32Hex,
-  normalizeHex32,
   hexToBytes,
   allPolicyFlagsEnabled,
   deriveConversationKeyFromSharedSecret,
@@ -54,12 +50,17 @@ import { normalizeRelays } from './relay-transport';
 import {
   createOnboardingDecryptCounter,
   recordOnboardingDecryptAttempt,
-  validateOnboardingGroup,
   parseBridgeEnvelope,
   parseOnboardingRequestBundle,
   parseEventJson,
   type PeerPolicyOverridePatch
 } from './onboarding-transport';
+import {
+  buildOnboardResponseFilter,
+  resolveOnboardResponseEnvelope,
+} from './onboard-response';
+import { buildProfileBootstrap as buildProfileBootstrapState } from './profile-bootstrap';
+import { buildRuntimeDeviceConfig } from './runtime-config';
 import {
   createPendingBridgeCommandState,
   matchBridgeCompletion,
@@ -413,29 +414,7 @@ export class BrowserBridgeNode {
     // `as never` passes the runtime option through that type gap.
     this.pool = new SimplePool({ enableReconnect: true } as never);
 
-    const signerSettings = normalizeSignerSettings(this.config.signerSettings);
-    // Fields read from signerSettings are operator-tunable; the bare numeric
-    // literals below are host-fixed runtime tuning not exposed in settings —
-    // timeouts in seconds (ecdh/onboard/max_future_skew are all 30s), the
-    // request cache size, and the ECDH/signature cache capacities + TTLs.
-    const runtimeConfig = {
-      device: {
-        sign_timeout_secs: signerSettings.sign_timeout_secs,
-        ecdh_timeout_secs: 30,
-        ping_timeout_secs: signerSettings.ping_timeout_secs,
-        onboard_timeout_secs: 30,
-        request_ttl_secs: signerSettings.request_ttl_secs,
-        max_future_skew_secs: 30,
-        request_cache_limit: 2048,
-        ecdh_cache_capacity: 256,
-        ecdh_cache_ttl_secs: 300,
-        sig_cache_capacity: 256,
-        sig_cache_ttl_secs: 120,
-        state_save_interval_secs: signerSettings.state_save_interval_secs,
-        event_kind: BIFROST_EVENT_KIND,
-        peer_selection_strategy: signerSettings.peer_selection_strategy
-      }
-    };
+    const runtimeConfig = buildRuntimeDeviceConfig(this.config.signerSettings);
 
     this.emitLog('info', 'relay', 'bootstrap_begin', {
       relay_count: this.activeRelays.length,
@@ -1137,46 +1116,17 @@ export class BrowserBridgeNode {
   }
 
   private buildProfileBootstrap(): ProfileBootstrapState {
-    if (typeof this.config.groupPackageJson !== 'string' || !this.config.groupPackageJson.trim()) {
-      throw new Error('Missing group package for profile runtime bootstrap');
-    }
-    if (typeof this.config.sharePackageJson !== 'string' || !this.config.sharePackageJson.trim()) {
-      throw new Error('Missing share package for profile runtime bootstrap');
-    }
-
-    let group: GroupPackageWire;
-    let share: { idx?: number; seckey?: string };
-    try {
-      group = JSON.parse(this.config.groupPackageJson) as GroupPackageWire;
-      share = JSON.parse(this.config.sharePackageJson) as { idx?: number; seckey?: string };
-    } catch {
-      throw new Error('Invalid profile bootstrap package JSON');
-    }
-
-    if (!isRecord(group) || !Array.isArray(group.members)) {
-      throw new Error('Invalid group package for profile runtime bootstrap');
-    }
-    if (!isRecord(share) || typeof share.seckey !== 'string') {
-      throw new Error('Invalid share package for profile runtime bootstrap');
-    }
-
-    const shareSecret = normalizeHex32(share.seckey, 'share secret');
-    this.localSharePubkey32 = normalizePubkey32Hex(
-      getPublicKey(hexToBytes(shareSecret)),
-      'share public key'
-    );
-
+    const built = buildProfileBootstrapState({
+      groupPackageJson: this.config.groupPackageJson,
+      sharePackageJson: this.config.sharePackageJson,
+    });
+    this.localSharePubkey32 = built.localSharePubkey32;
+    this.groupPubkey32 = built.groupPubkey32;
+    this.peerPubkeys32 = new Set(built.peerPubkeys32);
+    this.xonlyToPeer32 = new Map(built.xonlyToPeer32Entries);
     return {
-      shareSecret,
-      bootstrap: {
-        group,
-        share: {
-          idx: typeof share.idx === 'number' ? Math.trunc(share.idx) : 0,
-          seckey: shareSecret,
-        },
-        peers: this.applyGroupState(group),
-        initial_peer_nonces: [],
-      }
+      shareSecret: built.shareSecret,
+      bootstrap: built.bootstrap,
     };
   }
 
@@ -1212,12 +1162,12 @@ export class BrowserBridgeNode {
       decoded.peer_pk_xonly
     );
 
-    const filter = {
-      kinds: [BIFROST_EVENT_KIND],
-      authors: [decoded.peer_pk_xonly],
-      '#p': [bundle.local_pubkey32.toLowerCase()],
-      since: now - 30
-    } as Filter;
+    const filter = buildOnboardResponseFilter({
+      eventKind: BIFROST_EVENT_KIND,
+      peerPubkey32: decoded.peer_pk_xonly,
+      localPubkey32: bundle.local_pubkey32,
+      since: now - 30,
+    });
 
     return await new Promise<OnboardingRequestResult>((resolve, reject) => {
       let settled = false;
@@ -1276,35 +1226,17 @@ export class BrowserBridgeNode {
             );
             const envelope = parseBridgeEnvelope(decrypted);
             if (!envelope) return;
-            if (envelope.request_id !== requestId) return;
-            if (envelope.payload.type !== 'OnboardResponse') return;
-            if (!isRecord(envelope.payload.data)) return;
-            if (!isRecord(envelope.payload.data.group)) return;
-
-            // Defense-in-depth: validate the decrypted group descriptor
-            // before handing it to the runtime. See `validateOnboardingGroup`
-            // for the TS/Rust validation split.
-            const validation = validateOnboardingGroup(
-              envelope.payload.data.group,
-              bundle.local_pubkey32,
-            );
-            if (validation.kind === 'malformed') return;
-            if (validation.kind === 'peer_not_in_group') {
-              this.emitLog('warn', 'onboarding', 'peer_not_in_group', {
-                request_id: requestId,
-              });
-              return;
-            }
-            if (validation.kind === 'duplicate_members') {
-              this.emitLog('warn', 'onboarding', 'duplicate_members', {
-                request_id: requestId,
-              });
-              return;
-            }
-            if (validation.kind === 'bad_threshold') {
-              this.emitLog('warn', 'onboarding', 'bad_threshold', {
-                request_id: requestId,
-              });
+            const resolved = resolveOnboardResponseEnvelope(envelope, requestId, bundle.local_pubkey32);
+            if (resolved.kind === 'ignore') {
+              if (
+                resolved.reason === 'peer_not_in_group' ||
+                resolved.reason === 'duplicate_members' ||
+                resolved.reason === 'bad_threshold'
+              ) {
+                this.emitLog('warn', 'onboarding', resolved.reason, {
+                  request_id: requestId,
+                });
+              }
               return;
             }
 
@@ -1317,7 +1249,7 @@ export class BrowserBridgeNode {
                 share_pubkey32: bundle.local_pubkey32.toLowerCase()
               });
               resolve({
-                response: envelope.payload.data as OnboardResponseWire,
+                response: resolved.response,
                 bundle
               });
             });
