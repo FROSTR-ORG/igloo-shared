@@ -7,8 +7,10 @@
 // surface; these are in-repo helpers only.
 
 import { validateEvent } from 'nostr-tools/pure';
+import { getPublicKey } from 'nostr-tools';
 
 import { createLogger } from './observability';
+import { SecretBytes } from './secret';
 
 const DEFAULT_RELAYS_FALLBACK = ['ws://127.0.0.1:8194'];
 const BROWSER_RUNTIME_ENV = ((import.meta as ImportMeta & {
@@ -168,4 +170,23 @@ export function buildUnsignedEvent(event: Record<string, unknown>, pubkey: strin
   }
 
   return candidate;
+}
+
+/**
+ * Derive the normalized share public key from a share seckey hex, wiping the
+ * transient secret bytes immediately after the pubkey is computed.
+ *
+ * The seckey arrives as a bare string on the snapshot wire by policy (see
+ * `wire/runtime.ts` — a serialized wire cannot carry a runtime `Secret`
+ * wrapper, and the observability schema already forbids logging it). A JS
+ * string cannot be zeroized, but the `Uint8Array` form can: this keeps the
+ * byte copy from lingering until GC.
+ */
+export function sharePubkeyFromSeckeyHex(seckeyHex: string): string {
+  const bytes = SecretBytes.fromHex(seckeyHex);
+  try {
+    return normalizePubkey32Hex(getPublicKey(bytes.expose()), 'share public key');
+  } finally {
+    bytes.wipe();
+  }
 }

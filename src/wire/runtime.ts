@@ -237,6 +237,10 @@ export type RuntimeSnapshotWire = {
     group: GroupPackageWire;
     share: {
       idx: number;
+      // Bare string by policy: a serialized wire cannot carry a runtime `Secret`
+      // wrapper. It is never logged (forbidden by the observability schema), and
+      // the consumer derives its pubkey via `sharePubkeyFromSeckeyHex`, which
+      // wipes the transient byte form on read.
       seckey: string;
     };
     peers: string[];

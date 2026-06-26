@@ -44,7 +44,8 @@ import {
   hexToBytes,
   allPolicyFlagsEnabled,
   deriveConversationKeyFromSharedSecret,
-  buildUnsignedEvent
+  buildUnsignedEvent,
+  sharePubkeyFromSeckeyHex
 } from './runtime-internal';
 import { normalizeRelays } from './relay-transport';
 import {
@@ -1017,10 +1018,7 @@ export class BrowserBridgeNode {
     if (!snapshot) return false;
 
     try {
-      this.localSharePubkey32 = normalizePubkey32Hex(
-        getPublicKey(hexToBytes(snapshot.bootstrap.share.seckey)),
-        'share public key'
-      );
+      this.localSharePubkey32 = sharePubkeyFromSeckeyHex(snapshot.bootstrap.share.seckey);
       this.applyGroupState(snapshot.bootstrap.group);
       this.runtime.restore_runtime(JSON.stringify(runtimeConfig), this.restoreOptions.runtimeSnapshotJson!);
       this.emitLog('info', 'runtime', 'restored', {
