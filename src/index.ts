@@ -98,6 +98,7 @@ export {
   groupJsonFromPayload,
   normalizeGroupMemberSharePublicKey,
   normalizeHex32,
+  onboardPreviewDisplayMeta,
   profilePayloadFromRuntimeSnapshot,
   publicKeyFromSecret,
   shareJsonFromPayload,
@@ -108,9 +109,8 @@ export type {
   BrowserProfilePreview,
   BrowserProfileSource,
   BrowserRuntimeProfileSummary,
+  OnboardPreviewDisplayMeta,
 } from './browser-profile/core';
-export { onboardPreviewDisplayMeta } from './browser-profile/core/preview';
-export type { OnboardPreviewDisplayMeta } from './browser-profile/core/preview';
 
 // --- browser-profile-persistence ---
 export {

@@ -30,7 +30,7 @@ function fixturePayload(): BrowserProfilePackagePayload {
 
 describe('onboardPreviewDisplayMeta', () => {
   it('derives keyset name, threshold label, and share index from the preview', () => {
-    const preview = createBrowserProfilePreview(fixturePayload(), 'onboard');
+    const preview = createBrowserProfilePreview(fixturePayload(), 'bfonboard');
     const meta = onboardPreviewDisplayMeta(preview);
     expect(meta.keysetName).toBe('Acme Keyset');
     expect(meta.thresholdLabel).toBe('2/3');
@@ -38,7 +38,7 @@ describe('onboardPreviewDisplayMeta', () => {
   });
 
   it('falls back to a generic share label when the share is not a group member', () => {
-    const preview = createBrowserProfilePreview(fixturePayload(), 'onboard');
+    const preview = createBrowserProfilePreview(fixturePayload(), 'bfonboard');
     const orphaned = { ...preview, share_public_key: 'f'.repeat(64) };
     expect(onboardPreviewDisplayMeta(orphaned).shareLabel).toBe('Share');
   });
