@@ -31,8 +31,18 @@ export type RuntimePeerStatus = {
   incoming_available: number;
   outgoing_available: number;
   outgoing_spent: number;
+  latency_ms?: number;
+  nonce_inventory_history?: RuntimePeerNonceInventorySample[];
   can_sign: boolean;
+  can_ping?: boolean;
+  can_onboard?: boolean;
+  can_ecdh?: boolean;
   should_send_nonces: boolean;
+};
+
+export type RuntimePeerNonceInventorySample = {
+  updated_at: number;
+  held_count: number;
 };
 
 export type RuntimeMetadata = {

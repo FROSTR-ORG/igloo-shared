@@ -345,17 +345,20 @@ export {
   buildRotationDistributionArtifact,
   buildRotationDraft,
   buildRotationDraftFromBfshares,
+  buildRotationDraftFromSourcePackages,
   buildRotationProfilePayload,
   deriveGroupIdFromProfilePayload,
   fetchRotationBackupEvent,
   publishRotationDistributionBackup,
   recoverRotationSourceFromBfshare,
+  recoverRotationSourceFromPackage,
   recoverSecretKeyFromShares,
 } from './rotation';
 export type {
   BrowserRecoveredKey,
   BrowserRotationDraft,
   BrowserRotationRecoveredSource,
+  BrowserRotationSourcePackageKind,
   RotationDistributionArtifact,
   RotationTargetAssignment,
 } from './rotation';

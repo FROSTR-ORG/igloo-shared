@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import {
   createSignerNode,
+  deriveReadinessExplanation,
   getRuntimeReadiness,
   getRuntimeSnapshot,
   getRuntimeStatus,
@@ -37,6 +38,71 @@ describe('runtime read-model delegations', () => {
     expect(node.runtimeStatus).toHaveBeenCalledOnce();
     expect(node.snapshotRuntimeState).toHaveBeenCalledOnce();
     expect(node.runtimeReadiness).toHaveBeenCalledOnce();
+  });
+});
+
+describe('deriveReadinessExplanation', () => {
+  test('uses explicit peer ECDH capability when the runtime provides it', () => {
+    const explanation = deriveReadinessExplanation({
+      status: {
+        device_id: 'device-1',
+        pending_ops: 0,
+        last_active: 1700000000,
+        known_peers: 2,
+        request_seq: 7,
+      },
+      metadata: {
+        device_id: 'device-1',
+        member_idx: 1,
+        share_public_key: 'share-pub-1',
+        group_public_key: 'group-pub-1',
+        peers: ['peer-1', 'peer-2'],
+      },
+      readiness: {
+        runtime_ready: true,
+        restore_complete: true,
+        sign_ready: false,
+        ecdh_ready: false,
+        threshold: 2,
+        signing_peer_count: 0,
+        ecdh_peer_count: 1,
+        last_refresh_at: 1700000000,
+        degraded_reasons: ['insufficient_ecdh_peers'],
+      },
+      peers: [
+        {
+          idx: 2,
+          pubkey: 'peer-1',
+          known: true,
+          last_seen: 1700000000,
+          online: true,
+          incoming_available: 0,
+          outgoing_available: 0,
+          outgoing_spent: 0,
+          can_sign: false,
+          can_ecdh: false,
+          should_send_nonces: false,
+        },
+        {
+          idx: 3,
+          pubkey: 'peer-2',
+          known: true,
+          last_seen: 1700000000,
+          online: true,
+          incoming_available: 0,
+          outgoing_available: 0,
+          outgoing_spent: 0,
+          can_sign: false,
+          can_ecdh: true,
+          should_send_nonces: false,
+        },
+      ],
+      peer_permission_states: [],
+      pending_operations: [],
+    });
+
+    expect(explanation.operations.ecdh_ready_peers).toEqual(['peer-2']);
+    expect(explanation.operations.missing_ecdh_peers).toEqual(['peer-1']);
   });
 });
 

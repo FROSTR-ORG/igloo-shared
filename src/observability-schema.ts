@@ -70,6 +70,7 @@ export const EVENT_SCHEMAS: EventSchema = {
     restored: ['mode', 'peers', 'public_key'],
     restore_failed: ['error_message'],
     inbound_error: ['error_message'],
+    inbound_accepted: ['pending_ops', 'sign_ready', 'ecdh_ready', 'message'],
     status_event: ['kind', 'sign_ready', 'ecdh_ready', 'pending_ops'],
     completion: [
       'request_id',
@@ -88,8 +89,19 @@ export const EVENT_SCHEMAS: EventSchema = {
       'elapsed_ms',
       'op_type',
       'message',
+      'failed_peer',
     ],
     pump_failed: ['error_message'],
+  },
+  sign: {
+    complete: ['request_id', 'signature_count', 'message'],
+  },
+  ecdh: {
+    complete: ['request_id', 'message'],
+  },
+  ping: {
+    complete: ['request_id', 'peer', 'elapsed_ms', 'message'],
+    failure: ['request_id', 'peer', 'message', 'reason_code', 'failed_peer'],
   },
   relay: {
     probe_start: ['relay'],
@@ -99,9 +111,9 @@ export const EVENT_SCHEMAS: EventSchema = {
     connect_failed: ['relay', 'error_message'],
     bootstrap_begin: ['relay_count', 'relays'],
     bootstrap_ok: ['connected_relays'],
-    inbound_event: ['event_id', 'event_pubkey', 'event_created_at', 'event_kind'],
+    inbound_event: ['event_id', 'event_pubkey', 'event_created_at', 'event_kind', 'message'],
     subscription_closed: ['reasons'],
-    publish_complete: ['event_id', 'relays_ok', 'relays_total'],
+    publish_complete: ['event_id', 'relays_ok', 'relays_total', 'message'],
   },
   onboarding: {
     package_decoded: ['mode', 'share_pubkey32', 'peer_pubkey32', 'relay_count'],
@@ -125,6 +137,7 @@ export const EVENT_SCHEMAS: EventSchema = {
     response_event_ignored: ['request_id', 'event_id', 'reason'],
     request_closed: ['request_id', 'reasons', 'relays'],
     request_publish: ['request_id', 'relays_ok', 'relays_total'],
+    peer_onboarded: ['peer_pubkey', 'message'],
     decrypt_cap_reached: ['request_id'],
     peer_not_in_group: ['request_id'],
     duplicate_members: ['request_id'],

@@ -10,6 +10,7 @@ import {
 } from './browser-profile/core';
 import {
   createEncryptedProfileBackup,
+  decodeBfProfilePackage,
   deriveProfileIdFromShareSecret,
   encodeBfOnboardPackage,
   type BrowserOnboardPackagePayload,
@@ -37,9 +38,16 @@ type RotatedKeysetBundleExport = {
   };
 };
 
-export type BrowserRotationRecoveredSource = BrowserShareRecoveryResult & {
+export type BrowserRotationSourcePackageKind = 'bfprofile' | 'bfshare';
+
+export type BrowserRotationRecoveredSource = {
+  share: BrowserShareRecoveryResult['share'];
+  backup?: BrowserShareRecoveryResult['backup'] | null;
+  profile: BrowserShareRecoveryResult['profile'];
+  event?: BrowserShareRecoveryResult['event'] | null;
   groupId: string;
   sharePublicKey: string;
+  sourcePackageKind: BrowserRotationSourcePackageKind;
 };
 
 export type BrowserRotationDraft = {
@@ -96,7 +104,47 @@ export async function recoverRotationSourceFromBfshare(
     ...recovered,
     groupId: await deriveGroupIdFromProfilePayload(recovered.profile),
     sharePublicKey: publicKeyFromSecret(recovered.share.shareSecret),
+    sourcePackageKind: 'bfshare',
   } satisfies BrowserRotationRecoveredSource;
+}
+
+export async function recoverRotationSourceFromPackage(
+  packageText: string,
+  password: string,
+  options?: { maxWait?: number },
+) {
+  const normalized = packageText.trim();
+  if (normalized.startsWith('bfshare1')) {
+    return await recoverRotationSourceFromBfshare(normalized, password, options);
+  }
+  if (normalized.startsWith('bfprofile1')) {
+    const profile = await decodeBfProfilePackage(normalized, password);
+    const shareSecret = normalizeHex32(profile.device.shareSecret, 'bfprofile share secret');
+    const relays = profile.device.relays.map((relay) => relay.trim()).filter(Boolean);
+    if (!relays.length) {
+      throw new Error('bfprofile source must include at least one relay.');
+    }
+    return {
+      share: { shareSecret, relays },
+      backup: null,
+      profile: {
+        ...profile,
+        device: {
+          ...profile.device,
+          shareSecret,
+          relays,
+        },
+      },
+      event: null,
+      groupId: await deriveGroupIdFromProfilePayload(profile),
+      sharePublicKey: publicKeyFromSecret(shareSecret),
+      sourcePackageKind: 'bfprofile',
+    } satisfies BrowserRotationRecoveredSource;
+  }
+  if (normalized.startsWith('bfonboard1')) {
+    throw new Error('bfonboard packages are adoption packages. Use bfprofile or bfshare source packages for rotation or recovery.');
+  }
+  throw new Error('Source package must be a bfprofile1... or bfshare1... package.');
 }
 
 export async function buildRotationDraft(input: {
@@ -221,9 +269,22 @@ export async function buildRotationDraftFromBfshares(input: {
   groupName?: string | null;
   maxWait?: number;
 }) {
+  return await buildRotationDraftFromSourcePackages(input);
+}
+
+export async function buildRotationDraftFromSourcePackages(input: {
+  sources: Array<{
+    packageText: string;
+    password: string;
+  }>;
+  threshold: number;
+  count: number;
+  groupName?: string | null;
+  maxWait?: number;
+}) {
   const recoveredSources = await Promise.all(
     input.sources.map((source) =>
-      recoverRotationSourceFromBfshare(source.packageText, source.password, {
+      recoverRotationSourceFromPackage(source.packageText, source.password, {
         maxWait: input.maxWait,
       }),
     ),
