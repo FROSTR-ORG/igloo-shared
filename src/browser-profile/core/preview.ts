@@ -1,6 +1,9 @@
 import {
+  groupPackageFromWireJson,
+  groupNameFromPackage,
   groupPackageToWireJson,
   groupPublicKeyFromPackage,
+  totalCountFromGroupPackage,
   xOnlyFromCompressedPubkey,
   type BrowserGroupPackage,
   type BrowserProfilePackagePayload,
@@ -59,5 +62,31 @@ export function createBrowserProfilePreview(
     group_package_json: groupJsonFromPayload(payload),
     share_package_json: shareJsonFromPayload(payload),
     source,
+  };
+}
+
+export type OnboardPreviewDisplayMeta = {
+  keysetName: string;
+  thresholdLabel: string;
+  shareLabel: string;
+};
+
+/**
+ * Derive human-facing onboarding metadata (keyset name, `threshold/count`
+ * label, and `Share #idx`) from a profile preview. The share index is resolved
+ * secret-free by matching the preview's share public key against the parsed
+ * group members — the seckey-bearing `share_package_json` is never read.
+ */
+export function onboardPreviewDisplayMeta(
+  preview: BrowserProfilePreview,
+): OnboardPreviewDisplayMeta {
+  const group = groupPackageFromWireJson(preview.group_package_json);
+  const member = group.members.find(
+    (candidate) => xOnlyFromCompressedPubkey(candidate.pubkey) === preview.share_public_key,
+  );
+  return {
+    keysetName: groupNameFromPackage(group),
+    thresholdLabel: `${group.threshold}/${totalCountFromGroupPackage(group)}`,
+    shareLabel: member ? `Share #${member.idx}` : 'Share',
   };
 }

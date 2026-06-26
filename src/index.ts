@@ -109,6 +109,8 @@ export type {
   BrowserProfileSource,
   BrowserRuntimeProfileSummary,
 } from './browser-profile/core';
+export { onboardPreviewDisplayMeta } from './browser-profile/core/preview';
+export type { OnboardPreviewDisplayMeta } from './browser-profile/core/preview';
 
 // --- browser-profile-persistence ---
 export {
