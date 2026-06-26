@@ -69,7 +69,9 @@ export function deriveReadinessExplanation(
   const signResponderPeers = peers
     .filter((peer) => peer.online && peer.outgoing_available > 0)
     .map((peer) => peer.pubkey);
-  const ecdhReadyPeers = peers.filter((peer) => peer.online).map((peer) => peer.pubkey);
+  const ecdhReadyPeers = peers
+    .filter((peer) => peer.can_ecdh ?? peer.online)
+    .map((peer) => peer.pubkey);
 
   return {
     runtime_ready: readiness.runtime_ready,
@@ -97,7 +99,9 @@ export function deriveReadinessExplanation(
       missing_sign_responder_peers: peers
         .filter((peer) => !(peer.online && peer.outgoing_available > 0))
         .map((peer) => peer.pubkey),
-      missing_ecdh_peers: peers.filter((peer) => !peer.online).map((peer) => peer.pubkey)
+      missing_ecdh_peers: peers
+        .filter((peer) => !(peer.can_ecdh ?? peer.online))
+        .map((peer) => peer.pubkey)
     }
   };
 }

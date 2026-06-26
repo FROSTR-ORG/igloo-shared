@@ -1317,11 +1317,12 @@ export class BrowserBridgeNode {
           });
         }
 
-        this.emitLog('debug', 'relay', 'inbound_event', {
+        this.emitLog('info', 'relay', 'inbound_event', {
           event_id: event.id,
           event_pubkey: event.pubkey,
           event_created_at: event.created_at,
-          event_kind: event.kind
+          event_kind: event.kind,
+          message: 'Inbound relay event received',
         });
       },
       onclose: (reasons: string[]) => {
@@ -1353,6 +1354,14 @@ export class BrowserBridgeNode {
             ecdh_ready: runtimeEvent.status.readiness.ecdh_ready,
             pending_ops: runtimeEvent.status.status.pending_ops
           });
+          if (runtimeEvent.kind === 'inbound_accepted') {
+            this.emitLog('info', 'runtime', 'inbound_accepted', {
+              pending_ops: runtimeEvent.status.status.pending_ops,
+              sign_ready: runtimeEvent.status.readiness.sign_ready,
+              ecdh_ready: runtimeEvent.status.readiness.ecdh_ready,
+              message: 'Inbound runtime event accepted',
+            });
+          }
         }
       }
 
@@ -1367,10 +1376,11 @@ export class BrowserBridgeNode {
             const succeeded = results.filter(
               (entry: PromiseSettledResult<unknown>) => entry.status === 'fulfilled'
             ).length;
-            this.emitLog('debug', 'relay', 'publish_complete', {
+            this.emitLog('info', 'relay', 'publish_complete', {
               event_id: outboundEvent.id,
               relays_ok: succeeded,
-              relays_total: results.length
+              relays_total: results.length,
+              message: 'Relay publish completed',
             });
           });
         }
@@ -1392,9 +1402,16 @@ export class BrowserBridgeNode {
             );
             if (index >= 0) {
               const pending = this.pendingPings.splice(index, 1)[0];
+              const elapsedMs = Date.now() - pending.startedAtMs;
+              this.emitLog(pending.quiet ? 'debug' : 'info', 'ping', 'complete', {
+                request_id: ping.requestId,
+                peer: ping.peer.toLowerCase(),
+                elapsed_ms: elapsedMs,
+                message: `Ping completed in ${elapsedMs}ms`,
+              });
               pending.resolve({
                 success: true,
-                latency: Date.now() - pending.startedAtMs
+                latency: elapsedMs
               });
             }
           }
@@ -1402,6 +1419,11 @@ export class BrowserBridgeNode {
           const sign = parseSignCompletion(completion);
           if (sign) {
             this.dispatchBridgeCompletion('sign', sign.requestId, (pending) => {
+              this.emitLog('info', 'sign', 'complete', {
+                request_id: sign.requestId,
+                signature_count: sign.signatures.length,
+                message: 'Sign request completed',
+              });
               pending.resolve(sign.signatures[0]);
             });
           }
@@ -1409,6 +1431,10 @@ export class BrowserBridgeNode {
           const ecdh = parseEcdhCompletion(completion);
           if (ecdh) {
             this.dispatchBridgeCompletion('ecdh', ecdh.requestId, (pending) => {
+              this.emitLog('info', 'ecdh', 'complete', {
+                request_id: ecdh.requestId,
+                message: 'ECDH request completed',
+              });
               pending.resolve(ecdh.sharedSecretHex32);
             });
           }
@@ -1417,6 +1443,7 @@ export class BrowserBridgeNode {
           if (onboardServed) {
             this.emitLog('info', 'onboarding', 'peer_onboarded', {
               peer_pubkey: onboardServed.peerPubkey,
+              message: 'Peer onboarded',
             });
             this.emit('onboard-complete', { peerPubkey: onboardServed.peerPubkey });
           }
@@ -1432,6 +1459,8 @@ export class BrowserBridgeNode {
           const failureDetails = {
             op_type: parsedFailure?.opType,
             message: parsedFailure?.message,
+            reason_code: parsedFailure?.reasonCode,
+            failed_peer: parsedFailure?.failedPeer,
             request_id: failureRequestId(failure),
           };
           if (parsedFailure?.opType === 'ping') {
@@ -1441,7 +1470,11 @@ export class BrowserBridgeNode {
               if (pending.quiet) {
                 this.emitLog('debug', 'runtime', 'failure', failureDetails);
               } else {
-                this.emitLog('info', 'runtime', 'failure', failureDetails);
+                this.emitLog('info', 'ping', 'failure', {
+                  ...failureDetails,
+                  peer: pending.peer,
+                  message: error,
+                });
               }
               pending.resolve({
                 success: false,

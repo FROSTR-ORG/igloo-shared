@@ -162,10 +162,20 @@ export function parseOnboardServedCompletion(
 
 export function parseOperationFailure(
   failure: unknown
-): { opType: string; message: string } | null {
+): { opType: string; message: string; reasonCode?: string; failedPeer?: string } | null {
   if (!isRecord(failure)) return null;
   if (typeof failure.op_type !== 'string' || typeof failure.message !== 'string') return null;
-  return { opType: failure.op_type, message: failure.message };
+  return {
+    opType: failure.op_type,
+    message: failure.message,
+    reasonCode:
+      typeof failure.reason_code === 'string'
+        ? failure.reason_code
+        : typeof failure.code === 'string'
+          ? failure.code
+          : undefined,
+    failedPeer: typeof failure.failed_peer === 'string' ? failure.failed_peer : undefined,
+  };
 }
 
 /**

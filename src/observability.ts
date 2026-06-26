@@ -35,7 +35,7 @@ const ACTIVE_LEVEL: ObservabilityLevel = DEBUG_ENABLED
   ? 'debug'
   : VERBOSE_ENABLED
     ? 'info'
-    : 'warn';
+    : 'info';
 
 function shouldEmit(level: ObservabilityLevel) {
   return LOG_LEVEL_RANK[level] >= LOG_LEVEL_RANK[ACTIVE_LEVEL];

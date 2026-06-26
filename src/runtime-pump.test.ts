@@ -77,6 +77,22 @@ describe('parseOperationFailure', () => {
     });
   });
 
+  test('preserves safe scalar failure metadata', () => {
+    expect(
+      parseOperationFailure({
+        op_type: 'sign',
+        message: 'boom',
+        code: 'timeout',
+        failed_peer: 'peer-pubkey',
+      }),
+    ).toEqual({
+      opType: 'sign',
+      message: 'boom',
+      reasonCode: 'timeout',
+      failedPeer: 'peer-pubkey',
+    });
+  });
+
   test('returns null when either field is missing or mistyped', () => {
     expect(parseOperationFailure({ op_type: 'sign' })).toBeNull();
     expect(parseOperationFailure({ message: 'boom' })).toBeNull();

@@ -37,9 +37,12 @@ export type RuntimePeerStatus = {
   incoming_available: number;
   outgoing_available: number;
   outgoing_spent: number;
+  latency_ms?: number;
+  nonce_inventory_history?: RuntimePeerNonceInventorySample[];
   can_sign: boolean;
   can_ecdh: boolean;
   can_ping: boolean;
+  can_onboard?: boolean;
   should_send_nonces: boolean;
   /** Most recent PING round-trip latency (ms); null until a ping completes. */
   last_response_latency_ms: number | null;
@@ -47,6 +50,11 @@ export type RuntimePeerStatus = {
   avg_latency_ms: number | null;
   /** Bounded nonce-held history (oldest first) for the sparkline. */
   nonce_history: RuntimeNonceHistoryPoint[];
+};
+
+export type RuntimePeerNonceInventorySample = {
+  updated_at: number;
+  held_count: number;
 };
 
 export type RuntimeMetadata = {
