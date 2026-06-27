@@ -1,7 +1,7 @@
 import { nip19 } from 'nostr-tools';
 
 import { getWasmKeysetApi } from './bridge-wasm-runtime';
-import { Secret } from './secret';
+import { Secret, type ShareSecretHex } from './secret';
 import {
   normalizeHex32,
   publicKeyFromSecret,
@@ -40,7 +40,7 @@ export type BrowserRotationDraft = {
   members: Array<{ idx: number; pubkey: string }>;
   shares: Array<{
     memberIndex: number;
-    shareSecret: string;
+    shareSecret: ShareSecretHex;
     sharePublicKey: string;
   }>;
 };
@@ -75,10 +75,10 @@ function normalizeRelays(relays: string[]) {
  * for the removed relay-backup fetch: the group context comes from the caller's
  * own profile, not from a relay-published encrypted backup.
  */
-function buildDistinctShareWires(groupPackage: BrowserGroupPackage, shareSecrets: string[]) {
+function buildDistinctShareWires(groupPackage: BrowserGroupPackage, shareSecrets: ShareSecretHex[]) {
   const byIdx = new Map<number, { idx: number; seckey: string }>();
   for (const secret of shareSecrets) {
-    const wire = shareWireFromSecret(groupPackage, secret);
+    const wire = shareWireFromSecret(groupPackage, secret.expose());
     byIdx.set(wire.idx, wire);
   }
   return [...byIdx.values()];
@@ -86,7 +86,7 @@ function buildDistinctShareWires(groupPackage: BrowserGroupPackage, shareSecrets
 
 export async function buildRotationDraft(input: {
   groupPackage: BrowserGroupPackage;
-  shareSecrets: string[];
+  shareSecrets: ShareSecretHex[];
   threshold: number;
   count: number;
   groupName?: string | null;
@@ -128,17 +128,20 @@ export async function buildRotationDraft(input: {
     count: rotated.next.group.members.length,
     groupName: input.groupName?.trim() || input.groupPackage.groupName,
     members,
-    shares: rotated.next.shares.map((share) => ({
-      memberIndex: share.idx,
-      shareSecret: normalizeHex32(share.seckey, 'rotated share secret'),
-      sharePublicKey: publicKeyFromSecret(share.seckey),
-    })),
+    shares: rotated.next.shares.map((share) => {
+      const shareSecret = Secret.of(normalizeHex32(share.seckey, 'rotated share secret'));
+      return {
+        memberIndex: share.idx,
+        shareSecret,
+        sharePublicKey: publicKeyFromSecret(shareSecret.expose()),
+      };
+    }),
   } satisfies BrowserRotationDraft;
 }
 
 export type BrowserRecoveredKey = {
-  nsec: string;
-  signingKeyHex: string;
+  nsec: Secret<string>;
+  signingKeyHex: Secret<string>;
 };
 
 /**
@@ -149,7 +152,7 @@ export type BrowserRecoveredKey = {
  */
 export async function recoverSecretKeyFromShares(input: {
   groupPackage: BrowserGroupPackage;
-  shareSecrets: string[];
+  shareSecrets: ShareSecretHex[];
 }): Promise<BrowserRecoveredKey> {
   const shares = buildDistinctShareWires(input.groupPackage, input.shareSecrets);
   if (shares.length < input.groupPackage.threshold) {
@@ -169,7 +172,14 @@ export async function recoverSecretKeyFromShares(input: {
   const bytes = new Uint8Array(
     (signingKeyHex.match(/.{2}/g) ?? []).map((byte) => Number.parseInt(byte, 16)),
   );
-  return { nsec: nip19.nsecEncode(bytes), signingKeyHex };
+  try {
+    return {
+      nsec: Secret.of(nip19.nsecEncode(bytes)),
+      signingKeyHex: Secret.of(signingKeyHex),
+    };
+  } finally {
+    bytes.fill(0);
+  }
 }
 
 export async function buildRotationProfilePayload(
@@ -181,12 +191,13 @@ export async function buildRotationProfilePayload(
     throw new Error(`Rotation draft does not contain member ${assignment.memberIndex}.`);
   }
   const relays = normalizeRelays(assignment.relays);
+  const shareSecret = share.shareSecret.expose();
   return {
-    profileId: await deriveProfileIdFromShareSecret(share.shareSecret),
+    profileId: await deriveProfileIdFromShareSecret(shareSecret),
     version: 1,
     device: {
       name: assignment.label.trim(),
-      shareSecret: share.shareSecret,
+      shareSecret,
       manualPeerPolicyOverrides: [],
       relays,
     },
