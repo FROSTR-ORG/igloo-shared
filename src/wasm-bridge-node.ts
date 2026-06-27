@@ -67,7 +67,9 @@ import {
   matchBridgeCompletion,
   clearPendingCommand,
   parsePingCompletion,
+  parsePingServedCompletion,
   parseSignCompletion,
+  parseSignServedCompletion,
   parseEcdhCompletion,
   parseOnboardServedCompletion,
   parseOperationFailure,
@@ -1416,6 +1418,15 @@ export class BrowserBridgeNode {
             }
           }
 
+          const pingServed = parsePingServedCompletion(completion);
+          if (pingServed) {
+            this.emitLog('info', 'ping', 'served', {
+              request_id: pingServed.requestId,
+              peer: pingServed.peer,
+              message: 'Ping response sent',
+            });
+          }
+
           const sign = parseSignCompletion(completion);
           if (sign) {
             this.dispatchBridgeCompletion('sign', sign.requestId, (pending) => {
@@ -1425,6 +1436,15 @@ export class BrowserBridgeNode {
                 message: 'Sign request completed',
               });
               pending.resolve(sign.signatures[0]);
+            });
+          }
+
+          const signServed = parseSignServedCompletion(completion);
+          if (signServed) {
+            this.emitLog('info', 'sign', 'served', {
+              request_id: signServed.requestId,
+              peer: signServed.peer,
+              message: 'Signature share sent',
             });
           }
 

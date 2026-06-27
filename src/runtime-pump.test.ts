@@ -8,7 +8,9 @@ import {
   parseEcdhCompletion,
   parseOperationFailure,
   parsePingCompletion,
+  parsePingServedCompletion,
   parseSignCompletion,
+  parseSignServedCompletion,
   type PendingBridgeCommand,
 } from './runtime-pump';
 
@@ -69,6 +71,44 @@ describe('parsePingCompletion', () => {
   });
 });
 
+describe('parsePingServedCompletion', () => {
+  test('parses request_id and peer pubkey', () => {
+    expect(
+      parsePingServedCompletion({
+        PingServed: { request_id: 'r3-served', peer_pubkey32_hex: 'ABCDEF' },
+      }),
+    ).toEqual({
+      requestId: 'r3-served',
+      peer: 'abcdef',
+    });
+  });
+
+  test('returns null on missing fields or non-record input', () => {
+    expect(parsePingServedCompletion({ PingServed: { request_id: 'r3' } })).toBeNull();
+    expect(parsePingServedCompletion({ PingServed: 'x' })).toBeNull();
+    expect(parsePingServedCompletion(42)).toBeNull();
+  });
+});
+
+describe('parseSignServedCompletion', () => {
+  test('parses request_id and peer pubkey', () => {
+    expect(
+      parseSignServedCompletion({
+        SignServed: { request_id: 'r4-served', peer_pubkey32_hex: 'FEDCBA' },
+      }),
+    ).toEqual({
+      requestId: 'r4-served',
+      peer: 'fedcba',
+    });
+  });
+
+  test('returns null on missing fields or non-record input', () => {
+    expect(parseSignServedCompletion({ SignServed: { request_id: 'r4' } })).toBeNull();
+    expect(parseSignServedCompletion({ SignServed: 'x' })).toBeNull();
+    expect(parseSignServedCompletion(42)).toBeNull();
+  });
+});
+
 describe('parseOperationFailure', () => {
   test('parses op_type and message', () => {
     expect(parseOperationFailure({ op_type: 'sign', message: 'boom' })).toEqual({
@@ -104,7 +144,9 @@ describe('parseOperationFailure', () => {
 describe('completionKind', () => {
   test('tags each known completion shape', () => {
     expect(completionKind({ Ping: {} })).toBe('ping');
+    expect(completionKind({ PingServed: {} })).toBe('ping_served');
     expect(completionKind({ Sign: {} })).toBe('sign');
+    expect(completionKind({ SignServed: {} })).toBe('sign_served');
     expect(completionKind({ Ecdh: {} })).toBe('ecdh');
   });
 
@@ -119,6 +161,8 @@ describe('completionRequestId / failureRequestId', () => {
     expect(completionRequestId({ Sign: { request_id: 'r1' } })).toBe('r1');
     expect(completionRequestId({ Ecdh: { request_id: 'r2' } })).toBe('r2');
     expect(completionRequestId({ Ping: { request_id: 'r3' } })).toBe('r3');
+    expect(completionRequestId({ PingServed: { request_id: 'r4' } })).toBe('r4');
+    expect(completionRequestId({ SignServed: { request_id: 'r5' } })).toBe('r5');
   });
 
   test('returns undefined when no request_id is present', () => {

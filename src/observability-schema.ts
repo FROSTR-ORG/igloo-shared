@@ -95,12 +95,14 @@ export const EVENT_SCHEMAS: EventSchema = {
   },
   sign: {
     complete: ['request_id', 'signature_count', 'message'],
+    served: ['request_id', 'peer', 'message'],
   },
   ecdh: {
     complete: ['request_id', 'message'],
   },
   ping: {
     complete: ['request_id', 'peer', 'elapsed_ms', 'message'],
+    served: ['request_id', 'peer', 'message'],
     failure: ['request_id', 'peer', 'message', 'reason_code', 'failed_peer'],
   },
   relay: {

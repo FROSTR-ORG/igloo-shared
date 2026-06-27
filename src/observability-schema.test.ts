@@ -31,8 +31,10 @@ describe('allow-list redactor', () => {
     expect(hasEventSchema('runtime', 'failure')).toBe(true);
     expect(hasEventSchema('runtime', 'inbound_accepted')).toBe(true);
     expect(hasEventSchema('sign', 'complete')).toBe(true);
+    expect(hasEventSchema('sign', 'served')).toBe(true);
     expect(hasEventSchema('ecdh', 'complete')).toBe(true);
     expect(hasEventSchema('ping', 'complete')).toBe(true);
+    expect(hasEventSchema('ping', 'served')).toBe(true);
     expect(hasEventSchema('ping', 'failure')).toBe(true);
     expect(hasEventSchema('relay', 'inbound_event')).toBe(true);
     expect(hasEventSchema('relay', 'publish_complete')).toBe(true);
@@ -67,6 +69,30 @@ describe('allow-list redactor', () => {
       peer: 'peer-pubkey',
       elapsed_ms: 17,
       message: 'Ping completed in 17ms',
+    });
+    expect(
+      sanitizeDetails('ping', 'served', {
+        request_id: 'req-ping-served',
+        peer: 'peer-pubkey',
+        message: 'Ping response sent',
+        password: 'LEAK',
+      }),
+    ).toEqual({
+      request_id: 'req-ping-served',
+      peer: 'peer-pubkey',
+      message: 'Ping response sent',
+    });
+    expect(
+      sanitizeDetails('sign', 'served', {
+        request_id: 'req-sign-served',
+        peer: 'peer-pubkey',
+        message: 'Signature share sent',
+        signature_secret_share: 'LEAK',
+      }),
+    ).toEqual({
+      request_id: 'req-sign-served',
+      peer: 'peer-pubkey',
+      message: 'Signature share sent',
     });
   });
 

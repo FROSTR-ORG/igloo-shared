@@ -118,6 +118,19 @@ export function parsePingCompletion(completion: unknown): { requestId: string; p
   return { requestId, peer };
 }
 
+export function parsePingServedCompletion(
+  completion: unknown
+): { requestId: string; peer: string } | null {
+  if (!isRecord(completion)) return null;
+  const payload = completion.PingServed;
+  if (!isRecord(payload)) return null;
+
+  const requestId = payload.request_id;
+  const peer = payload.peer_pubkey32_hex;
+  if (typeof requestId !== 'string' || typeof peer !== 'string') return null;
+  return { requestId, peer: peer.toLowerCase() };
+}
+
 export function parseSignCompletion(
   completion: unknown
 ): { requestId: string; signatures: string[] } | null {
@@ -131,6 +144,19 @@ export function parseSignCompletion(
   return signatures.length > 0
     ? { requestId: payload.request_id, signatures }
     : null;
+}
+
+export function parseSignServedCompletion(
+  completion: unknown
+): { requestId: string; peer: string } | null {
+  if (!isRecord(completion)) return null;
+  const payload = completion.SignServed;
+  if (!isRecord(payload)) return null;
+
+  const requestId = payload.request_id;
+  const peer = payload.peer_pubkey32_hex;
+  if (typeof requestId !== 'string' || typeof peer !== 'string') return null;
+  return { requestId, peer: peer.toLowerCase() };
 }
 
 export function parseEcdhCompletion(
@@ -186,7 +212,9 @@ export function parseOperationFailure(
 export function completionKind(completion: unknown): string {
   if (!isRecord(completion)) return 'unknown';
   if (isRecord(completion.Ping)) return 'ping';
+  if (isRecord(completion.PingServed)) return 'ping_served';
   if (isRecord(completion.Sign)) return 'sign';
+  if (isRecord(completion.SignServed)) return 'sign_served';
   if (isRecord(completion.Ecdh)) return 'ecdh';
   return 'unknown';
 }
@@ -194,7 +222,13 @@ export function completionKind(completion: unknown): string {
 /** Extract `request_id` from a completion payload, or return `undefined`. */
 export function completionRequestId(completion: unknown): string | undefined {
   if (!isRecord(completion)) return undefined;
-  for (const payload of [completion.Ping, completion.Sign, completion.Ecdh]) {
+  for (const payload of [
+    completion.Ping,
+    completion.PingServed,
+    completion.Sign,
+    completion.SignServed,
+    completion.Ecdh,
+  ]) {
     if (isRecord(payload) && typeof payload.request_id === 'string') {
       return payload.request_id;
     }
