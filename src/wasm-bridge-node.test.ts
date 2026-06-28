@@ -5,6 +5,7 @@ import {
   resetWasmBridgeLoaderConfig,
   setInjectedWasmBridgeModuleForTests,
 } from './bridge-wasm-runtime';
+import { Nip44NormalizeError } from './nip44-normalize';
 import type { RuntimeConfig } from './wire';
 
 // PR-I4 (R3 / Bucket I): BrowserBridgeNode (the post-G.2 split's largest module)
@@ -241,6 +242,123 @@ describe('bridge-command failure drain (R6.5)', () => {
     await expect(
       internals.runBridgeCommand('ecdh', { type: 'ecdh', pubkey32_hex: 'bb'.repeat(32) }),
     ).rejects.toThrow('ecdh peer unavailable');
+    expect(internals.pendingCommandState.commands.size).toBe(0);
+    expect(internals.pendingCommandState.kindFifo.ecdh).toHaveLength(0);
+  });
+});
+
+describe('NIP-44 adversarial wrapper coverage (C4)', () => {
+  type Nip44Internals = {
+    runtime: unknown;
+    pendingCommandState: {
+      commands: Map<string, unknown>;
+      kindFifo: { sign: string[]; ecdh: string[] };
+    };
+  };
+
+  function readyStatus() {
+    return JSON.stringify({
+      readiness: {
+        sign_ready: true,
+        ecdh_ready: true,
+        restore_complete: true,
+        last_refresh_at: Math.floor(Date.now() / 1000) + 60,
+        degraded_reasons: [],
+        threshold: 2,
+        signing_peer_count: 2,
+        ecdh_peer_count: 2,
+      },
+      peers: [],
+      peer_permission_states: [],
+    });
+  }
+
+  function nodeWithRuntime(runtime: unknown) {
+    const node = new BrowserBridgeNode(baseConfig);
+    const internals = node as unknown as Nip44Internals;
+    internals.runtime = runtime;
+    return { node, internals };
+  }
+
+  function ecdhFailureRuntime(message: string, handleCommand = vi.fn()) {
+    return {
+      tick: () => {},
+      handle_command: handleCommand,
+      runtime_status: readyStatus,
+      drain_runtime_events: () => '[]',
+      drain_outbound_events: () => '[]',
+      drain_completions: () => '[]',
+      drain_failures: () =>
+        JSON.stringify([{ op_type: 'ecdh', message, request_id: 'wasm-ecdh-1' }]),
+    };
+  }
+
+  function ecdhCompletionRuntime(sharedSecretHex32: string, handleCommand = vi.fn()) {
+    return {
+      tick: () => {},
+      handle_command: handleCommand,
+      runtime_status: readyStatus,
+      drain_runtime_events: () => '[]',
+      drain_outbound_events: () => '[]',
+      drain_completions: () =>
+        JSON.stringify([
+          {
+            Ecdh: {
+              request_id: 'wasm-ecdh-1',
+              shared_secret_hex32: sharedSecretHex32,
+            },
+          },
+        ]),
+      drain_failures: () => '[]',
+    };
+  }
+
+  test('nip44Encrypt rejects non-string plaintext before issuing ECDH', async () => {
+    const handleCommand = vi.fn();
+    const { node } = nodeWithRuntime(ecdhFailureRuntime('should not run', handleCommand));
+
+    await expect(
+      node.nip44Encrypt('bb'.repeat(32), 5 as unknown as string),
+    ).rejects.toThrow('NIP-44 plaintext must be a string');
+    expect(handleCommand).not.toHaveBeenCalled();
+  });
+
+  test('nip44Decrypt rejects non-string ciphertext before issuing ECDH', async () => {
+    const handleCommand = vi.fn();
+    const { node } = nodeWithRuntime(ecdhFailureRuntime('should not run', handleCommand));
+
+    await expect(
+      node.nip44Decrypt('bb'.repeat(32), 5 as unknown as string),
+    ).rejects.toThrow('NIP-44 ciphertext must be a string');
+    expect(handleCommand).not.toHaveBeenCalled();
+  });
+
+  test('nip44Encrypt propagates drained ECDH failures and clears pending state', async () => {
+    const { node, internals } = nodeWithRuntime(ecdhFailureRuntime('ecdh peer unavailable'));
+
+    await expect(node.nip44Encrypt('bb'.repeat(32), 'hello')).rejects.toThrow(
+      'ecdh peer unavailable',
+    );
+    expect(internals.pendingCommandState.commands.size).toBe(0);
+    expect(internals.pendingCommandState.kindFifo.ecdh).toHaveLength(0);
+  });
+
+  test('nip44Decrypt propagates drained ECDH failures and clears pending state', async () => {
+    const { node, internals } = nodeWithRuntime(ecdhFailureRuntime('ecdh peer unavailable'));
+
+    await expect(node.nip44Decrypt('bb'.repeat(32), 'AAAA')).rejects.toThrow(
+      'ecdh peer unavailable',
+    );
+    expect(internals.pendingCommandState.commands.size).toBe(0);
+    expect(internals.pendingCommandState.kindFifo.ecdh).toHaveLength(0);
+  });
+
+  test('nip44Decrypt rejects malformed ciphertext after ECDH and clears pending state', async () => {
+    const { node, internals } = nodeWithRuntime(ecdhCompletionRuntime('ab'.repeat(32)));
+
+    await expect(node.nip44Decrypt('bb'.repeat(32), 'abc-def_invalid')).rejects.toThrow(
+      Nip44NormalizeError,
+    );
     expect(internals.pendingCommandState.commands.size).toBe(0);
     expect(internals.pendingCommandState.kindFifo.ecdh).toHaveLength(0);
   });
