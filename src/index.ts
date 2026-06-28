@@ -333,11 +333,14 @@ export {
   buildRotationDistributionArtifact,
   buildRotationDraft,
   buildRotationProfilePayload,
+  recoverRotationSourceFromPackage,
   recoverSecretKeyFromShares,
 } from './rotation';
 export type {
   BrowserRecoveredKey,
   BrowserRotationDraft,
+  BrowserRotationRecoveredSource,
+  BrowserRotationSourcePackageKind,
   RotationDistributionArtifact,
   RotationTargetAssignment,
 } from './rotation';

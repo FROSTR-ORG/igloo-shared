@@ -3,16 +3,34 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { publicKeyFromSecret } from './browser-profile/core';
 import type { BrowserGroupPackage } from './profile-package';
 import { Secret } from './secret';
-import { buildRotationDraft, recoverSecretKeyFromShares } from './rotation';
+import {
+  buildRotationDraft,
+  recoverRotationSourceFromPackage,
+  recoverSecretKeyFromShares,
+} from './rotation';
 
 const mockKeysetApi = vi.hoisted(() => ({
   rotate_keyset_bundle: vi.fn(),
   recover_secret_key_from_shares: vi.fn(),
 }));
 
+const mockProfilePackages = vi.hoisted(() => ({
+  decodeBfProfilePackage: vi.fn(),
+  decodeBfSharePackage: vi.fn(),
+}));
+
 vi.mock('./bridge-wasm-runtime', () => ({
   getWasmKeysetApi: vi.fn(async () => mockKeysetApi),
 }));
+
+vi.mock('./profile-package', async () => {
+  const actual = await vi.importActual<typeof import('./profile-package')>('./profile-package');
+  return {
+    ...actual,
+    decodeBfProfilePackage: mockProfilePackages.decodeBfProfilePackage,
+    decodeBfSharePackage: mockProfilePackages.decodeBfSharePackage,
+  };
+});
 
 const secretA = '11'.repeat(32);
 const secretB = '22'.repeat(32);
@@ -109,5 +127,44 @@ describe('recoverSecretKeyFromShares validation guards', () => {
         shareSecrets: [Secret.of(secretB)],
       }),
     ).rejects.toThrow(/does not belong/i);
+  });
+});
+
+describe('recoverRotationSourceFromPackage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('accepts bfprofile source packages without leaking the share secret', async () => {
+    mockProfilePackages.decodeBfProfilePackage.mockResolvedValue({
+      profileId: 'profile-1',
+      version: 1,
+      device: {
+        name: 'Device 1',
+        shareSecret: secretA,
+        manualPeerPolicyOverrides: [],
+        relays: [' wss://relay.example '],
+      },
+      groupPackage: group(2, [secretA, secretB]),
+    });
+
+    const source = await recoverRotationSourceFromPackage('  bfprofile1source  ', 'profile-pass');
+
+    expect(mockProfilePackages.decodeBfProfilePackage).toHaveBeenCalledWith(
+      'bfprofile1source',
+      expect.objectContaining({ expose: expect.any(Function) }),
+    );
+    expect(source.sourcePackageKind).toBe('bfprofile');
+    expect(source.shareSecret.expose()).toBe(secretA);
+    expect(source.relays).toEqual(['wss://relay.example']);
+    expect(source.sharePublicKey).toBe(publicKeyFromSecret(secretA));
+    expect(source.groupPackage?.threshold).toBe(2);
+    expect(JSON.stringify(source)).not.toContain(secretA);
+  });
+
+  it('rejects bfonboard packages as adoption packages', async () => {
+    await expect(
+      recoverRotationSourceFromPackage('bfonboard1demo', 'onboard-pass'),
+    ).rejects.toThrow(/adoption packages/i);
   });
 });

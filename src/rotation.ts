@@ -1,13 +1,15 @@
 import { nip19 } from 'nostr-tools';
 
 import { getWasmKeysetApi } from './bridge-wasm-runtime';
-import { Secret, type ShareSecretHex } from './secret';
+import { Secret, type Passphrase, type ShareSecretHex } from './secret';
 import {
   normalizeHex32,
   publicKeyFromSecret,
   shareWireFromSecret,
 } from './browser-profile/core';
 import {
+  decodeBfProfilePackage,
+  decodeBfSharePackage,
   deriveProfileIdFromShareSecret,
   encodeBfOnboardPackage,
   groupPackageToWireValue,
@@ -60,12 +62,61 @@ export type RotationDistributionArtifact = {
   onboardPackageText: string;
 };
 
+export type BrowserRotationSourcePackageKind = 'bfprofile' | 'bfshare';
+
+export type BrowserRotationRecoveredSource = {
+  shareSecret: ShareSecretHex;
+  relays: string[];
+  sharePublicKey: string;
+  groupPackage: BrowserGroupPackage | null;
+  sourcePackageKind: BrowserRotationSourcePackageKind;
+};
+
 function normalizeRelays(relays: string[]) {
   const normalized = relays.map((relay) => relay.trim()).filter(Boolean);
   if (!normalized.length) {
     throw new Error('At least one relay is required.');
   }
   return normalized;
+}
+
+function toPassphrase(value: Passphrase | string) {
+  return typeof value === 'string' ? Secret.of(value) : value;
+}
+
+export async function recoverRotationSourceFromPackage(
+  packageText: string,
+  password: Passphrase | string,
+): Promise<BrowserRotationRecoveredSource> {
+  const normalized = packageText.trim();
+  if (normalized.startsWith('bfshare1')) {
+    const share = await decodeBfSharePackage(normalized, toPassphrase(password));
+    const shareSecret = Secret.of(normalizeHex32(share.shareSecret, 'bfshare share secret'));
+    return {
+      shareSecret,
+      relays: normalizeRelays(share.relays),
+      sharePublicKey: publicKeyFromSecret(shareSecret.expose()),
+      groupPackage: null,
+      sourcePackageKind: 'bfshare',
+    };
+  }
+
+  if (normalized.startsWith('bfprofile1')) {
+    const profile = await decodeBfProfilePackage(normalized, toPassphrase(password));
+    const shareSecret = Secret.of(normalizeHex32(profile.device.shareSecret, 'bfprofile share secret'));
+    return {
+      shareSecret,
+      relays: normalizeRelays(profile.device.relays),
+      sharePublicKey: publicKeyFromSecret(shareSecret.expose()),
+      groupPackage: profile.groupPackage,
+      sourcePackageKind: 'bfprofile',
+    };
+  }
+
+  if (normalized.startsWith('bfonboard1')) {
+    throw new Error('bfonboard packages are adoption packages. Use bfprofile or bfshare source packages for rotation or recovery.');
+  }
+  throw new Error('Source package must be a bfprofile1... or bfshare1... package.');
 }
 
 /**
