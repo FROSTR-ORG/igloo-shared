@@ -6,6 +6,7 @@ import {
   completionRequestId,
   failureRequestId,
   parseEcdhCompletion,
+  parseEcdhServedCompletion,
   parseOperationFailure,
   parsePingCompletion,
   parsePingServedCompletion,
@@ -109,6 +110,25 @@ describe('parseSignServedCompletion', () => {
   });
 });
 
+describe('parseEcdhServedCompletion', () => {
+  test('parses request_id and peer pubkey', () => {
+    expect(
+      parseEcdhServedCompletion({
+        EcdhServed: { request_id: 'r5-served', peer_pubkey32_hex: 'AABBCC' },
+      }),
+    ).toEqual({
+      requestId: 'r5-served',
+      peer: 'aabbcc',
+    });
+  });
+
+  test('returns null on missing fields or non-record input', () => {
+    expect(parseEcdhServedCompletion({ EcdhServed: { request_id: 'r5' } })).toBeNull();
+    expect(parseEcdhServedCompletion({ EcdhServed: 'x' })).toBeNull();
+    expect(parseEcdhServedCompletion(42)).toBeNull();
+  });
+});
+
 describe('parseOperationFailure', () => {
   test('parses op_type and message', () => {
     expect(parseOperationFailure({ op_type: 'sign', message: 'boom' })).toEqual({
@@ -148,6 +168,7 @@ describe('completionKind', () => {
     expect(completionKind({ Sign: {} })).toBe('sign');
     expect(completionKind({ SignServed: {} })).toBe('sign_served');
     expect(completionKind({ Ecdh: {} })).toBe('ecdh');
+    expect(completionKind({ EcdhServed: {} })).toBe('ecdh_served');
   });
 
   test('returns "unknown" for unrecognized or non-record payloads', () => {
@@ -163,6 +184,7 @@ describe('completionRequestId / failureRequestId', () => {
     expect(completionRequestId({ Ping: { request_id: 'r3' } })).toBe('r3');
     expect(completionRequestId({ PingServed: { request_id: 'r4' } })).toBe('r4');
     expect(completionRequestId({ SignServed: { request_id: 'r5' } })).toBe('r5');
+    expect(completionRequestId({ EcdhServed: { request_id: 'r6' } })).toBe('r6');
   });
 
   test('returns undefined when no request_id is present', () => {

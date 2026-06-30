@@ -159,6 +159,19 @@ export function parseSignServedCompletion(
   return { requestId, peer: peer.toLowerCase() };
 }
 
+export function parseEcdhServedCompletion(
+  completion: unknown
+): { requestId: string; peer: string } | null {
+  if (!isRecord(completion)) return null;
+  const payload = completion.EcdhServed;
+  if (!isRecord(payload)) return null;
+
+  const requestId = payload.request_id;
+  const peer = payload.peer_pubkey32_hex;
+  if (typeof requestId !== 'string' || typeof peer !== 'string') return null;
+  return { requestId, peer: peer.toLowerCase() };
+}
+
 export function parseEcdhCompletion(
   completion: unknown
 ): { requestId: string; sharedSecretHex32: string } | null {
@@ -216,6 +229,7 @@ export function completionKind(completion: unknown): string {
   if (isRecord(completion.Sign)) return 'sign';
   if (isRecord(completion.SignServed)) return 'sign_served';
   if (isRecord(completion.Ecdh)) return 'ecdh';
+  if (isRecord(completion.EcdhServed)) return 'ecdh_served';
   return 'unknown';
 }
 
@@ -228,6 +242,7 @@ export function completionRequestId(completion: unknown): string | undefined {
     completion.Sign,
     completion.SignServed,
     completion.Ecdh,
+    completion.EcdhServed,
   ]) {
     if (isRecord(payload) && typeof payload.request_id === 'string') {
       return payload.request_id;

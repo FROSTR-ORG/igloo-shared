@@ -33,6 +33,7 @@ describe('allow-list redactor', () => {
     expect(hasEventSchema('sign', 'complete')).toBe(true);
     expect(hasEventSchema('sign', 'served')).toBe(true);
     expect(hasEventSchema('ecdh', 'complete')).toBe(true);
+    expect(hasEventSchema('ecdh', 'served')).toBe(true);
     expect(hasEventSchema('ping', 'complete')).toBe(true);
     expect(hasEventSchema('ping', 'served')).toBe(true);
     expect(hasEventSchema('ping', 'failure')).toBe(true);
@@ -93,6 +94,18 @@ describe('allow-list redactor', () => {
       request_id: 'req-sign-served',
       peer: 'peer-pubkey',
       message: 'Signature share sent',
+    });
+    expect(
+      sanitizeDetails('ecdh', 'served', {
+        request_id: 'req-ecdh-served',
+        peer: 'peer-pubkey',
+        message: 'ECDH share sent',
+        shared_secret_hex32: 'LEAK',
+      }),
+    ).toEqual({
+      request_id: 'req-ecdh-served',
+      peer: 'peer-pubkey',
+      message: 'ECDH share sent',
     });
   });
 

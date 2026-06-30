@@ -71,6 +71,7 @@ import {
   parseSignCompletion,
   parseSignServedCompletion,
   parseEcdhCompletion,
+  parseEcdhServedCompletion,
   parseOnboardServedCompletion,
   parseOperationFailure,
   completionKind,
@@ -1456,6 +1457,15 @@ export class BrowserBridgeNode {
                 message: 'ECDH request completed',
               });
               pending.resolve(ecdh.sharedSecretHex32);
+            });
+          }
+
+          const ecdhServed = parseEcdhServedCompletion(completion);
+          if (ecdhServed) {
+            this.emitLog('info', 'ecdh', 'served', {
+              request_id: ecdhServed.requestId,
+              peer: ecdhServed.peer,
+              message: 'ECDH share sent',
             });
           }
 

@@ -99,6 +99,7 @@ export const EVENT_SCHEMAS: EventSchema = {
   },
   ecdh: {
     complete: ['request_id', 'message'],
+    served: ['request_id', 'peer', 'message'],
   },
   ping: {
     complete: ['request_id', 'peer', 'elapsed_ms', 'message'],
