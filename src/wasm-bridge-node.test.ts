@@ -84,6 +84,99 @@ describe('connect error path', () => {
   });
 });
 
+describe('ping timeout peer availability', () => {
+  test('marks a timed-out peer unavailable in the browser runtime status', async () => {
+    vi.useFakeTimers();
+    try {
+      const peer = 'aa'.repeat(32);
+      const node = new BrowserBridgeNode(baseConfig);
+      const messages: unknown[] = [];
+      node.on('message', (payload) => messages.push(payload));
+
+      (node as unknown as { runtime: unknown }).runtime = {
+        tick: () => {},
+        handle_command: vi.fn(),
+        runtime_status: () =>
+          JSON.stringify({
+            status: {
+              device_id: 'browser-device',
+              pending_ops: 0,
+              last_active: 1,
+              known_peers: 1,
+              request_seq: 1,
+            },
+            metadata: {
+              device_id: 'browser-device',
+              member_idx: 1,
+              share_public_key: '11'.repeat(32),
+              group_public_key: '22'.repeat(32),
+              peers: [peer],
+            },
+            readiness: {
+              runtime_ready: true,
+              restore_complete: true,
+              sign_ready: false,
+              ecdh_ready: false,
+              threshold: 2,
+              signing_peer_count: 0,
+              ecdh_peer_count: 0,
+              last_refresh_at: 1,
+              degraded_reasons: [],
+            },
+            peers: [
+              {
+                idx: 2,
+                pubkey: peer,
+                known: true,
+                last_seen: 1,
+                online: true,
+                incoming_available: 0,
+                outgoing_available: 0,
+                outgoing_spent: 0,
+                can_sign: false,
+                can_ecdh: true,
+                can_ping: true,
+                should_send_nonces: false,
+                last_response_latency_ms: 40,
+                avg_latency_ms: 40,
+                nonce_history: [],
+              },
+            ],
+            peer_permission_states: [],
+            pending_operations: [],
+          }),
+        drain_runtime_events: () => '[]',
+        drain_outbound_events: () => '[]',
+        drain_completions: () => '[]',
+        drain_failures: () => '[]',
+      };
+
+      const ping = node.pingPeer(peer);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await expect(ping).resolves.toEqual({ success: false, error: 'Ping timed out' });
+      expect(node.runtimeStatus().peers[0]).toMatchObject({
+        pubkey: peer,
+        online: false,
+        can_sign: false,
+        can_ecdh: false,
+        can_ping: false,
+        last_response_latency_ms: null,
+      });
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          domain: 'ping',
+          event: 'failure',
+          message: 'Ping timed out',
+          peer,
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('refreshRelayHealth', () => {
   // refreshRelayHealth is private and exercises probeRelayWebSocket + the relay
   // pool; inject fakes the way the other isolation tests reach internals.

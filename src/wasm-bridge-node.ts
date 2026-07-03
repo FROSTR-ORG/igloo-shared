@@ -156,6 +156,7 @@ export class BrowserBridgeNode {
   private peerPubkeys32 = new Set<string>();
   private xonlyToPeer32 = new Map<string, string>();
   private pendingPings: PendingPing[] = [];
+  private unavailablePeers = new Map<string, number>();
   /**
    * Outstanding bridge commands keyed by `requestId`. A map (not a single
    * slot) so that completion dispatch is id-correlated rather than matched
@@ -626,11 +627,59 @@ export class BrowserBridgeNode {
     return this.runtimeStatus().metadata;
   }
 
+  private markPeerAvailable(peer: string): void {
+    this.unavailablePeers.delete(peer.toLowerCase());
+  }
+
+  private markPeerUnavailable(
+    peer: string,
+    message: string,
+    quiet: boolean,
+    details: Record<string, unknown> = {}
+  ): void {
+    const normalized = peer.toLowerCase();
+    this.unavailablePeers.set(normalized, Date.now());
+    this.emitLog(quiet ? 'debug' : 'info', 'ping', 'failure', {
+      ...details,
+      peer: normalized,
+      message,
+    });
+  }
+
+  private applyUnavailablePeerOverlay(status: RuntimeStatusSummary): RuntimeStatusSummary {
+    if (this.unavailablePeers.size === 0) return status;
+
+    let changed = false;
+    const peers = status.peers.map((peer): RuntimePeerStatus => {
+      const unavailableAtMs = this.unavailablePeers.get(peer.pubkey.toLowerCase());
+      if (unavailableAtMs == null) return peer;
+
+      if (peer.last_seen != null && peer.last_seen * 1_000 > unavailableAtMs) {
+        this.markPeerAvailable(peer.pubkey);
+        return peer;
+      }
+
+      changed = true;
+      return {
+        ...peer,
+        online: false,
+        can_sign: false,
+        can_ecdh: false,
+        can_ping: false,
+        last_response_latency_ms: null,
+      };
+    });
+
+    return changed ? { ...status, peers } : status;
+  }
+
   runtimeStatus(): RuntimeStatusSummary {
     if (!this.runtime) {
       throw new Error('runtime not initialized');
     }
-    const status = JSON.parse(this.runtime.runtime_status()) as RuntimeStatusSummary;
+    const status = this.applyUnavailablePeerOverlay(
+      JSON.parse(this.runtime.runtime_status()) as RuntimeStatusSummary
+    );
     // Bridge-enrich the core read model: relay sockets live in this bridge, not
     // the signer core (which emits these as null). `last_load_error` stays a
     // host signal — a hard restore failure throws out of connect() (no runtime
@@ -715,8 +764,8 @@ export class BrowserBridgeNode {
         pubkey: normalized,
         send: existing?.send ?? true,
         receive: existing?.receive ?? true,
-        state: status.can_sign ? 'warning' : status.online ? 'online' : 'idle',
-        statusLabel: status.can_sign ? 'sign-ready' : status.online ? 'online' : 'known',
+        state: status.can_sign ? 'warning' : status.online ? 'online' : 'offline',
+        statusLabel: status.can_sign ? 'sign-ready' : status.online ? 'online' : 'offline',
         lastSeen: status.last_seen
       } as PeerPolicy);
     }
@@ -756,6 +805,10 @@ export class BrowserBridgeNode {
         const index = this.pendingPings.indexOf(pending);
         if (index >= 0) {
           this.pendingPings.splice(index, 1);
+          this.markPeerUnavailable(pending.peer, 'Ping timed out', pending.quiet, {
+            op_type: 'ping',
+            reason_code: 'timeout',
+          });
           resolve({ success: false, error: 'Ping timed out' });
         }
       }, PING_TIMEOUT_MS);
@@ -1406,6 +1459,7 @@ export class BrowserBridgeNode {
             if (index >= 0) {
               const pending = this.pendingPings.splice(index, 1)[0];
               const elapsedMs = Date.now() - pending.startedAtMs;
+              this.markPeerAvailable(ping.peer.toLowerCase());
               this.emitLog(pending.quiet ? 'debug' : 'info', 'ping', 'complete', {
                 request_id: ping.requestId,
                 peer: ping.peer.toLowerCase(),
@@ -1497,15 +1551,7 @@ export class BrowserBridgeNode {
             const pending = this.pendingPings.shift();
             const error = parsedFailure.message || 'Ping round failed';
             if (pending) {
-              if (pending.quiet) {
-                this.emitLog('debug', 'runtime', 'failure', failureDetails);
-              } else {
-                this.emitLog('info', 'ping', 'failure', {
-                  ...failureDetails,
-                  peer: pending.peer,
-                  message: error,
-                });
-              }
+              this.markPeerUnavailable(pending.peer, error, pending.quiet, failureDetails);
               pending.resolve({
                 success: false,
                 error
