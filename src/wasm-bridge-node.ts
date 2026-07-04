@@ -631,6 +631,16 @@ export class BrowserBridgeNode {
     this.unavailablePeers.delete(peer.toLowerCase());
   }
 
+  private takePendingPingForFailure(failedPeer?: string): PendingPing | undefined {
+    if (failedPeer) {
+      const normalized = failedPeer.toLowerCase();
+      const index = this.pendingPings.findIndex((pending) => pending.peer === normalized);
+      return index >= 0 ? this.pendingPings.splice(index, 1)[0] : undefined;
+    }
+
+    return this.pendingPings.shift();
+  }
+
   private markPeerUnavailable(
     peer: string,
     message: string,
@@ -1548,7 +1558,7 @@ export class BrowserBridgeNode {
             request_id: failureRequestId(failure),
           };
           if (parsedFailure?.opType === 'ping') {
-            const pending = this.pendingPings.shift();
+            const pending = this.takePendingPingForFailure(parsedFailure.failedPeer);
             const error = parsedFailure.message || 'Ping round failed';
             if (pending) {
               this.markPeerUnavailable(pending.peer, error, pending.quiet, failureDetails);

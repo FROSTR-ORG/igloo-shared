@@ -85,6 +85,68 @@ describe('connect error path', () => {
 });
 
 describe('ping timeout peer availability', () => {
+  function installRuntimeWithPeers(
+    node: BrowserBridgeNode,
+    peers: string[],
+    failures: unknown[] = [],
+  ) {
+    (node as unknown as { runtime: unknown }).runtime = {
+      tick: () => {},
+      handle_command: vi.fn(),
+      runtime_status: () =>
+        JSON.stringify({
+          status: {
+            device_id: 'browser-device',
+            pending_ops: 0,
+            last_active: 1,
+            known_peers: peers.length,
+            request_seq: 1,
+          },
+          metadata: {
+            device_id: 'browser-device',
+            member_idx: 1,
+            share_public_key: '11'.repeat(32),
+            group_public_key: '22'.repeat(32),
+            peers,
+          },
+          readiness: {
+            runtime_ready: true,
+            restore_complete: true,
+            sign_ready: false,
+            ecdh_ready: false,
+            threshold: 2,
+            signing_peer_count: 0,
+            ecdh_peer_count: 0,
+            last_refresh_at: 1,
+            degraded_reasons: [],
+          },
+          peers: peers.map((peer, index) => ({
+            idx: index + 2,
+            pubkey: peer,
+            known: true,
+            last_seen: null,
+            online: true,
+            incoming_available: 0,
+            outgoing_available: 0,
+            outgoing_spent: 0,
+            can_sign: false,
+            can_ecdh: true,
+            can_ping: true,
+            should_send_nonces: false,
+            last_response_latency_ms: 40,
+            avg_latency_ms: 40,
+            nonce_history: [],
+          })),
+          peer_permission_states: [],
+          pending_operations: [],
+        }),
+      drain_runtime_events: () => '[]',
+      drain_outbound_events: () => '[]',
+      drain_completions: () => '[]',
+      drain_failures: () => JSON.stringify(failures.splice(0)),
+    };
+  }
+
   test('marks a timed-out peer unavailable in the browser runtime status', async () => {
     vi.useFakeTimers();
     try {
@@ -92,64 +154,7 @@ describe('ping timeout peer availability', () => {
       const node = new BrowserBridgeNode(baseConfig);
       const messages: unknown[] = [];
       node.on('message', (payload) => messages.push(payload));
-
-      (node as unknown as { runtime: unknown }).runtime = {
-        tick: () => {},
-        handle_command: vi.fn(),
-        runtime_status: () =>
-          JSON.stringify({
-            status: {
-              device_id: 'browser-device',
-              pending_ops: 0,
-              last_active: 1,
-              known_peers: 1,
-              request_seq: 1,
-            },
-            metadata: {
-              device_id: 'browser-device',
-              member_idx: 1,
-              share_public_key: '11'.repeat(32),
-              group_public_key: '22'.repeat(32),
-              peers: [peer],
-            },
-            readiness: {
-              runtime_ready: true,
-              restore_complete: true,
-              sign_ready: false,
-              ecdh_ready: false,
-              threshold: 2,
-              signing_peer_count: 0,
-              ecdh_peer_count: 0,
-              last_refresh_at: 1,
-              degraded_reasons: [],
-            },
-            peers: [
-              {
-                idx: 2,
-                pubkey: peer,
-                known: true,
-                last_seen: 1,
-                online: true,
-                incoming_available: 0,
-                outgoing_available: 0,
-                outgoing_spent: 0,
-                can_sign: false,
-                can_ecdh: true,
-                can_ping: true,
-                should_send_nonces: false,
-                last_response_latency_ms: 40,
-                avg_latency_ms: 40,
-                nonce_history: [],
-              },
-            ],
-            peer_permission_states: [],
-            pending_operations: [],
-          }),
-        drain_runtime_events: () => '[]',
-        drain_outbound_events: () => '[]',
-        drain_completions: () => '[]',
-        drain_failures: () => '[]',
-      };
+      installRuntimeWithPeers(node, [peer]);
 
       const ping = node.pingPeer(peer);
       await vi.advanceTimersByTimeAsync(10_000);
@@ -171,6 +176,58 @@ describe('ping timeout peer availability', () => {
           peer,
         }),
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('matches runtime ping failures to failed_peer instead of queue order', async () => {
+    vi.useFakeTimers();
+    try {
+      const firstPeer = 'aa'.repeat(32);
+      const secondPeer = 'bb'.repeat(32);
+      const failures: unknown[] = [];
+      const node = new BrowserBridgeNode(baseConfig);
+      const messages: unknown[] = [];
+      node.on('message', (payload) => messages.push(payload));
+      installRuntimeWithPeers(node, [firstPeer, secondPeer], failures);
+
+      const firstPing = node.pingPeer(firstPeer);
+      const secondPing = node.pingPeer(secondPeer);
+
+      failures.push({
+        request_id: 'ping-second',
+        op_type: 'ping',
+        code: 'timeout',
+        message: 'locked peer response timeout',
+        failed_peer: secondPeer,
+      });
+      (node as unknown as { pumpRuntime: (nowMs: number) => void }).pumpRuntime(Date.now());
+
+      await expect(secondPing).resolves.toMatchObject({
+        success: false,
+        error: 'locked peer response timeout',
+      });
+      const status = node.runtimeStatus();
+      expect(status.peers.find((peer) => peer.pubkey === firstPeer)).toMatchObject({
+        online: true,
+        can_ping: true,
+      });
+      expect(status.peers.find((peer) => peer.pubkey === secondPeer)).toMatchObject({
+        online: false,
+        can_ping: false,
+      });
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          domain: 'ping',
+          event: 'failure',
+          peer: secondPeer,
+          failed_peer: secondPeer,
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(firstPing).resolves.toMatchObject({ success: false, error: 'Ping timed out' });
     } finally {
       vi.useRealTimers();
     }
